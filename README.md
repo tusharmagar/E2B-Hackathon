@@ -132,17 +132,31 @@ Set WhatsApp webhook to: `https://your-app.vercel.app/api/webhook`
 
 ---
 
-## 📁 Project Structure
 
-```
-lib/
-├── e2b-agent.ts          # Main AI agent + E2B orchestration
-├── pdf-generator.ts      # Puppeteer PDF rendering
-├── twilio.ts             # WhatsApp messaging
-└── session-store.ts      # User conversation memory
 
-app/api/webhook/route.ts  # Twilio webhook handler
-```
+## 🚀 Future Enhancements
+
+### 🎨 **Dynamic PDF Generation Inside E2B**
+
+**Current approach:** PDF is generated on Vercel with fixed neobrutalism template
+
+**Planned improvement:** Move PDF generation entirely into E2B sandbox with AI-driven layouts
+
+**Benefits:**
+- 📊 **Adaptive Layouts**: Report structure matches data type (timeline, regional, categorical)
+- 🎨 **Contextual Styling**: Formal reports vs casual summaries based on user tone
+- 🖼️ **Better Chart Placement**: AI decides optimal chart positioning per insight
+- ⚡ **All in Sandbox**: No external PDF service needed—everything stays in E2B
+- 🎯 **Industry Templates**: Auto-detect industry (retail, hospitality, SaaS) and apply appropriate formatting
+
+
+---
+
+## 🔗 Links
+
+📺 **Demo Video**: [https://youtu.be/M0tcMI92-yg](https://youtu.be/M0tcMI92-yg)  
+📚 **E2B Docs**: [e2b.dev/docs](https://e2b.dev/docs)  
+🏆 **Hackathon**: [E2B MCP Agents Hackathon](https://luma.com/0vm36r4q?tk=QxjbLk)
 
 ---
 

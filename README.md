@@ -40,7 +40,7 @@ No dashboard login. No complex setup. Just answers.
 
 <div align="center">
 
-https://youtu.be/M0tcMI92-yg
+[![Dash Reports Demo](https://img.youtube.com/vi/M0tcMI92-yg/hqdefault.jpg)](https://youtu.be/M0tcMI92-yg)
 
 *2-minute demo of the complete flow*
 
@@ -64,7 +64,7 @@ https://youtu.be/M0tcMI92-yg
 
 <div align="center">
 
-![Architecture Diagram](architecture-diagram.png)
+![Architecture Diagram](Arc-diagram.png)
 
 *Complete workflow: From WhatsApp message to delivered PDF report*
 

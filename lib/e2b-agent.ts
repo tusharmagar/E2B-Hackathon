@@ -53,12 +53,22 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
 
     // Install Node.js dependencies
     console.log('📦 Installing Node.js packages...');
-    await sandbox.process.startAndWait('cd /home/user && npm install --legacy-peer-deps');
+    const npmInstall = await sandbox.process.start({
+      cmd: 'cd /home/user && npm install --legacy-peer-deps',
+      onStdout: (data) => console.log('npm:', data),
+      onStderr: (data) => console.log('npm error:', data)
+    });
+    await npmInstall.wait();
+    console.log('   ✅ npm install completed');
 
-    // Run the agent
+    // Verify tsx is installed
+    console.log('🔍 Checking tsx installation...');
+    await sandbox.process.startAndWait('ls -la /home/user/node_modules/.bin/tsx || echo "tsx not found"');
+
+    // Run the agent with node and tsx
     console.log('🤖 Running multi-step agent...');
     const agentProcess = await sandbox.process.start({
-      cmd: 'cd /home/user && ./node_modules/.bin/tsx agent.ts',
+      cmd: 'cd /home/user && node --import ./node_modules/tsx/dist/esm/index.mjs agent.ts',
       envVars: {
         EXA_API_KEY: process.env.EXA_API_KEY || '',
         GROQ_API_KEY: process.env.GROQ_API_KEY || '',

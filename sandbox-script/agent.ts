@@ -99,7 +99,7 @@ async function runAgent() {
     // Step 1: Convert CSV to database
     const db = await csvToSqlite('/home/user/data.csv');
 
-    // Step 2: Initialize Groq
+    // Step 2: Initialize Groq (accessing GPT-OSS-120B model)
     const groq = createGroq({ apiKey: GROQ_API_KEY });
 
     // Step 3: Create tools
@@ -164,16 +164,17 @@ Previous conversation: ${CONVERSATION_HISTORY.length > 0 ? JSON.stringify(CONVER
     console.log('\n🤖 Starting multi-step analysis...\n');
 
     const result = await generateText({
-      model: groq('llama-3.3-70b-versatile'),
+      model: groq('gpt-oss-120b'),
       tools,
       maxSteps: 15, // Allow deep iterative reasoning
       system: systemPrompt,
       prompt: `Analyze the data in the database. ${USER_MESSAGE}`,
-      onStepFinish: (step) => {
-        console.log(`\n📍 Step ${step.stepNumber}:`);
+      onStepFinish: (step: any) => {
+        const stepNum = step.stepNumber || step.stepIndex || 'N';
+        console.log(`\n📍 Step ${stepNum}:`);
         console.log(`   💭 ${step.text?.substring(0, 200)}${step.text && step.text.length > 200 ? '...' : ''}`);
         if (step.toolCalls && step.toolCalls.length > 0) {
-          console.log(`   🔧 Tools: ${step.toolCalls.map(t => t.toolName).join(', ')}`);
+          console.log(`   🔧 Tools: ${step.toolCalls.map((t: any) => t.toolName).join(', ')}`);
         }
       }
     });
@@ -205,7 +206,7 @@ Previous conversation: ${CONVERSATION_HISTORY.length > 0 ? JSON.stringify(CONVER
               result: toolResult.result
             });
           } else if (call.toolName === 'generate_chart' && toolResult) {
-            if (toolResult.result.success) {
+            if (toolResult.result.success && toolResult.result.filename) {
               charts.push(toolResult.result.filename);
             }
           } else if (call.toolName === 'calculate_statistics' && toolResult) {

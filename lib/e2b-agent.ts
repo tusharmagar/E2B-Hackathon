@@ -13,35 +13,39 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
   try {
     // Upload CSV file to sandbox
     console.log('📤 Uploading CSV to sandbox...');
-    await sandbox.files.write('/home/user/data.csv', input.csvBuffer);
+    await sandbox.filesystem.write('/home/user/data.csv', input.csvBuffer.toString('utf-8'));
+
+    // Create directories in sandbox
+    console.log('📁 Creating directories...');
+    await sandbox.process.startAndWait('mkdir -p /home/user/tools');
 
     // Read and upload all sandbox scripts
     console.log('📦 Uploading agent scripts...');
     const sandboxFiles = [
-      'sandbox-script/agent.ts',
-      'sandbox-script/package.json',
-      'sandbox-script/pdf-generator.ts',
-      'sandbox-script/pdf-template.html',
-      'sandbox-script/tools/sql-tool.ts',
-      'sandbox-script/tools/exa-tool.ts',
-      'sandbox-script/tools/stats-tool.ts',
-      'sandbox-script/tools/chart-tool.ts'
+      { local: 'sandbox-script/agent.ts', remote: '/home/user/agent.ts' },
+      { local: 'sandbox-script/package.json', remote: '/home/user/package.json' },
+      { local: 'sandbox-script/pdf-generator.ts', remote: '/home/user/pdf-generator.ts' },
+      { local: 'sandbox-script/pdf-template.html', remote: '/home/user/pdf-template.html' },
+      { local: 'sandbox-script/tools/sql-tool.ts', remote: '/home/user/tools/sql-tool.ts' },
+      { local: 'sandbox-script/tools/exa-tool.ts', remote: '/home/user/tools/exa-tool.ts' },
+      { local: 'sandbox-script/tools/stats-tool.ts', remote: '/home/user/tools/stats-tool.ts' },
+      { local: 'sandbox-script/tools/chart-tool.ts', remote: '/home/user/tools/chart-tool.ts' }
     ];
 
     for (const file of sandboxFiles) {
       try {
-        const content = readFileSync(join(process.cwd(), file), 'utf-8');
-        const sandboxPath = `/home/user/${file.replace('sandbox-script/', '')}`;
-        await sandbox.files.write(sandboxPath, content);
+        const content = readFileSync(join(process.cwd(), file.local), 'utf-8');
+        await sandbox.filesystem.write(file.remote, content);
+        console.log(`   ✅ Uploaded ${file.local}`);
       } catch (error) {
-        console.warn(`Could not upload ${file}:`, error);
+        console.warn(`Could not upload ${file.local}:`, error);
       }
     }
 
     // Install system dependencies
     console.log('🐳 Installing Docker and dependencies...');
     await sandbox.process.startAndWait('apt-get update');
-    await sandbox.process.startAndWait('apt-get install -y docker.io');
+    await sandbox.process.startAndWait('apt-get install -y docker.io nodejs npm');
     
     // Pull Exa MCP Docker image
     console.log('📥 Pulling Exa MCP Docker image...');
@@ -49,12 +53,16 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
 
     // Install Node.js dependencies
     console.log('📦 Installing Node.js packages...');
-    await sandbox.process.startAndWait('cd /home/user && npm install');
+    await sandbox.process.startAndWait('cd /home/user && npm install --legacy-peer-deps');
+
+    // Install tsx globally
+    console.log('📦 Installing tsx...');
+    await sandbox.process.startAndWait('npm install -g tsx');
 
     // Run the agent
     console.log('🤖 Running multi-step agent...');
     const agentProcess = await sandbox.process.start({
-      cmd: 'cd /home/user && npx tsx agent.ts',
+      cmd: 'cd /home/user && tsx agent.ts',
       envVars: {
         EXA_API_KEY: process.env.EXA_API_KEY || '',
         GROQ_API_KEY: process.env.GROQ_API_KEY || '',
@@ -69,13 +77,13 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
 
     // Download generated PDF
     console.log('📥 Downloading generated PDF...');
-    const pdfBuffer = await sandbox.files.read('/home/user/report.pdf');
+    const pdfBuffer = await sandbox.filesystem.read('/home/user/report.pdf');
 
     // Download insights JSON
     console.log('📊 Retrieving insights...');
     let insights: any = {};
     try {
-      const insightsJson = await sandbox.files.read('/home/user/insights.json');
+      const insightsJson = await sandbox.filesystem.read('/home/user/insights.json');
       insights = JSON.parse(insightsJson.toString());
     } catch (error) {
       console.warn('Could not read insights.json');

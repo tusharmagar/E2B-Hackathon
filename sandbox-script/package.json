@@ -7,7 +7,7 @@
     "csv-parser": "^3.0.0",
     "puppeteer": "^21.0.0",
     "@modelcontextprotocol/sdk": "^0.6.0",
-    "@ai-sdk/groq": "^0.0.50",
+    "@ai-sdk/groq": "^2.0.31",
     "ai": "^3.4.0",
     "chart.js": "^4.4.0",
     "canvas": "^2.11.0",

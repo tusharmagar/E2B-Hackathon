@@ -61,9 +61,10 @@ export async function generatePDF(insights: any): Promise<Buffer> {
     .replace('{{STATISTICS}}', statsHtml || '<p>No statistical analysis performed</p>')
     .replace('{{CHARTS}}', chartsHtml || '<p>No charts generated</p>');
 
-  // Launch Puppeteer
+  // Launch Puppeteer with system Chromium
   const browser = await puppeteer.launch({
     headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',

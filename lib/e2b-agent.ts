@@ -55,12 +55,24 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
     });
     
     await sandbox.process.startAndWait({
-      cmd: 'DEBIAN_FRONTEND=noninteractive sudo -E apt-get install -qq -y docker.io curl ca-certificates gnupg',
+      cmd: 'DEBIAN_FRONTEND=noninteractive sudo -E apt-get install -qq -y docker.io curl ca-certificates gnupg chromium fonts-liberation libnss3 libatk-bridge2.0-0 libgbm1',
       onStdout: (data) => process.stdout.write('.'),
       onStderr: () => {}
     });
     
-    console.log('\n   ✅ Docker installed');
+    console.log('\n   ✅ Docker and Chromium installed');
+    
+    // Start Docker daemon
+    console.log('🐳 Starting Docker daemon...');
+    await sandbox.process.start({
+      cmd: 'sudo dockerd',
+      onStdout: () => {},
+      onStderr: () => {}
+    });
+    
+    // Wait for Docker to be ready
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    console.log('   ✅ Docker daemon started');
     
     // Install Node.js from NodeSource
     console.log('📦 Installing Node.js 20...');
@@ -99,13 +111,14 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
     // Run the agent
     console.log('\n🤖 Running multi-step agent...\n');
     const agentProcess = await sandbox.process.start({
-      cmd: 'node --loader tsx /home/user/agent.ts',
+      cmd: 'npx tsx /home/user/agent.ts',
       cwd: '/home/user',
       envVars: {
         EXA_API_KEY: process.env.EXA_API_KEY || '',
         GROQ_API_KEY: process.env.GROQ_API_KEY || '',
         USER_MESSAGE: input.userMessage,
-        CONVERSATION_HISTORY: JSON.stringify(input.conversationHistory)
+        CONVERSATION_HISTORY: JSON.stringify(input.conversationHistory),
+        PUPPETEER_EXECUTABLE_PATH: '/usr/bin/chromium'
       },
       onStdout: (data) => console.log('Agent:', data),
       onStderr: (data) => console.error('Agent Error:', data)

@@ -42,33 +42,36 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
       }
     }
 
-    // Install system dependencies
+    // Install system dependencies with non-interactive flags
     console.log('🐳 Installing Docker and dependencies...');
     const aptUpdate = await sandbox.process.start({
-      cmd: 'sudo apt-get update',
+      cmd: 'sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq',
       onStdout: (data) => console.log('apt-get:', data),
       onStderr: (data) => console.log('apt-get error:', data)
     });
     await aptUpdate.wait();
     
     const aptInstall = await sandbox.process.start({
-      cmd: 'sudo apt-get install -y docker.io curl',
+      cmd: 'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io curl ca-certificates gnupg',
       onStdout: (data) => console.log('install:', data),
       onStderr: (data) => console.log('install error:', data)
     });
     await aptInstall.wait();
     
-    // Install Node.js from NodeSource
-    console.log('📦 Installing Node.js...');
+    // Install Node.js from NodeSource with non-interactive flags
+    console.log('📦 Installing Node.js (this may take 1-2 min)...');
     const nodeSetup = await sandbox.process.start({
-      cmd: 'curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -',
+      cmd: 'curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -',
+      envVars: {
+        DEBIAN_FRONTEND: 'noninteractive'
+      },
       onStdout: (data) => console.log('node setup:', data),
       onStderr: (data) => console.log('node setup error:', data)
     });
     await nodeSetup.wait();
     
     const nodeInstall = await sandbox.process.start({
-      cmd: 'sudo apt-get install -y nodejs',
+      cmd: 'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs',
       onStdout: (data) => console.log('node install:', data),
       onStderr: (data) => console.log('node install error:', data)
     });
@@ -78,7 +81,7 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
     console.log('🔍 Verifying Node.js installation...');
     const nodeCheck = await sandbox.process.start({
       cmd: 'which node && node --version && which npm && npm --version',
-      onStdout: (data) => console.log('node check:', data),
+      onStdout: (data) => console.log('✅', data),
       onStderr: (data) => console.log('node check error:', data)
     });
     await nodeCheck.wait();
@@ -86,7 +89,7 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
     // Pull Exa MCP Docker image
     console.log('📥 Pulling Exa MCP Docker image...');
     const dockerPull = await sandbox.process.start({
-      cmd: 'docker pull mcp/exa',
+      cmd: 'sudo docker pull mcp/exa',
       onStdout: (data) => console.log('docker:', data),
       onStderr: (data) => console.log('docker error:', data)
     });
@@ -100,7 +103,7 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
     console.log('📦 Installing Node.js packages...');
     console.log('   This may take 2-3 minutes...');
     const npmInstall = await sandbox.process.start({
-      cmd: 'cd /home/user && npm install --legacy-peer-deps',
+      cmd: 'cd /home/user && npm install --legacy-peer-deps --no-audit --no-fund',
       onStdout: (data) => console.log('npm:', data),
       onStderr: (data) => console.log('npm stderr:', data)
     });

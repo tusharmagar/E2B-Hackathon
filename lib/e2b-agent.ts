@@ -1,4 +1,4 @@
-import Sandbox from '@e2b/code-interpreter';
+import { Sandbox } from '@e2b/code-interpreter';
 import { generateText } from 'ai';
 import { groq } from '@ai-sdk/groq';
 import { tool } from 'ai';
@@ -14,31 +14,45 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
   }
   
   console.log(`   Using E2B API key: ${process.env.E2B_API_KEY.substring(0, 10)}...`);
+  const templateId = process.env.E2B_TEMPLATE_ID?.trim();
+  if (templateId) {
+    console.log(`   Using E2B template: ${templateId}`);
+  }
   
   // Create sandbox with timeout and error handling
-  let sandbox;
+  let sandbox: Sandbox | undefined;
   try {
     console.log('   Creating E2B Sandbox...');
-    sandbox = await Promise.race([
-      Sandbox.create({
-        apiKey: process.env.E2B_API_KEY,
-        timeoutMs: 300000 // 5 minutes
-      }),
-      new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('E2B sandbox creation timed out after 30 seconds')), 30000)
-      )
-    ]);
-    console.log('   ✅ Sandbox created successfully');
+    const createStarted = Date.now();
+    const creationWarn = setTimeout(() => {
+      console.log('   ⏳ Still creating sandbox (cold start can take ~30-60s)...');
+    }, 20000);
+    const createOpts = {
+      apiKey: process.env.E2B_API_KEY,
+      timeoutMs: 300000, // 5 minutes sandbox lifetime
+      requestTimeoutMs: 120000, // allow extra time for cold starts
+    };
+
+    sandbox = templateId
+      ? await Sandbox.create(templateId, createOpts)
+      : await Sandbox.create(createOpts);
+    clearTimeout(creationWarn);
+
+    const createSeconds = Math.round((Date.now() - createStarted) / 1000);
+    console.log(`   ✅ Sandbox created in ${createSeconds}s`);
   } catch (error: any) {
-    console.error('   ❌ Failed to create E2B sandbox:', error.message);
-    throw new Error(`E2B initialization failed: ${error.message}`);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('   ❌ Failed to create E2B sandbox:', message);
+    console.error('   ℹ️ Check E2B API key, credits, or template ID if configured.');
+    throw new Error(`E2B initialization failed: ${message}`);
   }
 
   try {
     // Upload CSV to sandbox
     console.log('📤 Uploading CSV to sandbox...');
-    const csvPath = 'data.csv';
-    await sandbox.files.write(csvPath, input.csvBuffer.toString('utf-8'));
+    const csvPath = '/home/user/data.csv';
+    const csvCopy = Uint8Array.from(input.csvBuffer);
+    await sandbox.files.write(csvPath, csvCopy.buffer);
     console.log(`   ✅ CSV uploaded to ${csvPath}`);
 
     // Store all charts generated during analysis

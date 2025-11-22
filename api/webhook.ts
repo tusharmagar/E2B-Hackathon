@@ -172,22 +172,3 @@ async function processCSVAsync(
   }
 }
 
-  } catch (error) {
-    console.error('❌ Webhook error:', error);
-    
-    // Try to notify user of error
-    try {
-      const payload = req.body as TwilioWebhookPayload;
-      const from = extractPhoneNumber(payload.From);
-      await sendWhatsAppMessage(
-        from,
-        '❌ Sorry, something went wrong while analyzing your data. Please try again later.'
-      );
-    } catch (notifyError) {
-      console.error('Failed to notify user of error:', notifyError);
-    }
-
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-}
-

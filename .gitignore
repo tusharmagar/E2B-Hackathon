@@ -4,10 +4,10 @@ node_modules/
 .env.*.local
 .vercel
 dist/
+.next/
 *.log
 .DS_Store
 *.pdf
 *.csv
 *.png
-sandbox-script/node_modules/
 

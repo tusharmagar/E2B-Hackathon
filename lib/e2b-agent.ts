@@ -45,14 +45,14 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
     // Install system dependencies
     console.log('🐳 Installing Docker and dependencies...');
     const aptUpdate = await sandbox.process.start({
-      cmd: 'apt-get update',
+      cmd: 'sudo apt-get update',
       onStdout: (data) => console.log('apt-get:', data),
       onStderr: (data) => console.log('apt-get error:', data)
     });
     await aptUpdate.wait();
     
     const aptInstall = await sandbox.process.start({
-      cmd: 'apt-get install -y docker.io curl',
+      cmd: 'sudo apt-get install -y docker.io curl',
       onStdout: (data) => console.log('install:', data),
       onStderr: (data) => console.log('install error:', data)
     });
@@ -61,14 +61,14 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
     // Install Node.js from NodeSource
     console.log('📦 Installing Node.js...');
     const nodeSetup = await sandbox.process.start({
-      cmd: 'curl -fsSL https://deb.nodesource.com/setup_20.x | bash -',
+      cmd: 'curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -',
       onStdout: (data) => console.log('node setup:', data),
       onStderr: (data) => console.log('node setup error:', data)
     });
     await nodeSetup.wait();
     
     const nodeInstall = await sandbox.process.start({
-      cmd: 'apt-get install -y nodejs',
+      cmd: 'sudo apt-get install -y nodejs',
       onStdout: (data) => console.log('node install:', data),
       onStderr: (data) => console.log('node install error:', data)
     });

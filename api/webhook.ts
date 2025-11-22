@@ -3,6 +3,7 @@ import { put } from '@vercel/blob';
 import { sendWhatsAppMessage, downloadMedia, extractPhoneNumber } from '../lib/twilio.js';
 import { getSession, createSession, updateSession } from '../lib/session-store.js';
 import { runE2BAgent } from '../lib/e2b-agent.js';
+import { generatePDF } from '../lib/pdf-generator.js';
 import { TwilioWebhookPayload } from '../lib/types.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -136,9 +137,18 @@ async function processCSVAsync(
       conversationHistory
     });
 
+    console.log(`📊 Analysis complete: ${result.charts.length} charts generated`);
+
+    // Generate PDF on Vercel with Puppeteer
+    console.log('📄 Generating PDF report...');
+    const pdfBuffer = await generatePDF({
+      summary: result.summary,
+      charts: result.charts
+    });
+
     // Upload PDF to Vercel Blob
     console.log('☁️ Uploading PDF to cloud storage...');
-    const blob = await put(`reports/${from}-${Date.now()}.pdf`, result.pdfBuffer, {
+    const blob = await put(`reports/${from}-${Date.now()}.pdf`, pdfBuffer, {
       access: 'public',
       token: process.env.BLOB_READ_WRITE_TOKEN
     });
@@ -153,7 +163,8 @@ async function processCSVAsync(
     });
 
     // Send PDF link to user
-    const responseMessage = `✅ *Analysis Complete!*\n\n${result.summary}\n\n📊 Your detailed PDF report is ready 👇`;
+    const summaryPreview = result.summary.substring(0, 200);
+    const responseMessage = `✅ *Analysis Complete!*\n\n${summaryPreview}${result.summary.length > 200 ? '...' : ''}\n\n📊 Your detailed PDF report is ready 👇`;
     
     await sendWhatsAppMessage(from, responseMessage, blob.url);
 
@@ -164,7 +175,7 @@ async function processCSVAsync(
     try {
       await sendWhatsAppMessage(
         from,
-        '❌ Sorry, something went wrong while analyzing your data. The analysis environment setup took too long. Please try again or contact support.'
+        '❌ Sorry, something went wrong while analyzing your data. Please try again. If the issue persists, check if your CSV format is correct.'
       );
     } catch (notifyError) {
       console.error('Failed to notify user of background error:', notifyError);

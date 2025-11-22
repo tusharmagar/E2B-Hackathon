@@ -41,8 +41,8 @@ export interface E2BAgentInput {
 }
 
 export interface E2BAgentOutput {
-  pdfBuffer: Buffer;
-  insights: AnalysisResults;
   summary: string;
+  charts: Buffer[];  // Array of chart image buffers from matplotlib
+  insights: any;     // Raw insights from agent
 }
 

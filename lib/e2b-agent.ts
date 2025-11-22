@@ -1,164 +1,220 @@
 import { CodeInterpreter } from '@e2b/code-interpreter';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { generateText } from 'ai';
+import { groq } from '@ai-sdk/groq';
+import { tool } from 'ai';
+import { z } from 'zod';
 import { E2BAgentInput, E2BAgentOutput } from './types.js';
 
 export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput> {
   console.log('🚀 Initializing E2B sandbox...');
   
+  // Create sandbox (E2B Code Interpreter has Python pre-installed)
   const sandbox = await CodeInterpreter.create({
     apiKey: process.env.E2B_API_KEY,
-    timeout: 600000 // 10 minutes to be safe
+    timeout: 300000 // 5 minutes
   });
 
   try {
-    // Upload CSV file to sandbox
+    // Upload CSV to sandbox
     console.log('📤 Uploading CSV to sandbox...');
-    await sandbox.filesystem.write('/home/user/data.csv', input.csvBuffer.toString('utf-8'));
+    const csvPath = '/home/user/data.csv';
+    await sandbox.filesystem.write(csvPath, input.csvBuffer.toString('utf-8'));
+    console.log(`   ✅ CSV uploaded to ${csvPath}`);
 
-    // Create tools directory
-    console.log('📁 Creating directories...');
-    await sandbox.filesystem.makeDir('/home/user/tools');
+    // Store all charts generated during analysis
+    const allCharts: Buffer[] = [];
 
-    // Read and upload all sandbox scripts
-    console.log('📦 Uploading agent scripts...');
-    const sandboxFiles = [
-      'sandbox-script/agent.ts',
-      'sandbox-script/package.json',
-      'sandbox-script/pdf-generator.ts',
-      'sandbox-script/pdf-template.html',
-      'sandbox-script/tools/sql-tool.ts',
-      'sandbox-script/tools/exa-tool.ts',
-      'sandbox-script/tools/stats-tool.ts',
-      'sandbox-script/tools/chart-tool.ts'
-    ];
+    // Define tools that generate Python code
+    const tools = {
+      run_python_analysis: tool({
+        description: `Execute Python code for data analysis. 
+        
+The CSV file is already loaded at '${csvPath}'.
+You have access to: pandas, numpy, matplotlib, sqlite3, and all standard Python libraries.
 
-    for (const file of sandboxFiles) {
-      try {
-        const content = readFileSync(join(process.cwd(), file), 'utf-8');
-        const sandboxPath = `/home/user/${file.replace('sandbox-script/', '')}`;
-        await sandbox.filesystem.write(sandboxPath, content);
-        console.log(`   ✅ Uploaded ${file}`);
-      } catch (error) {
-        console.warn(`Could not upload ${file}:`, error);
+Use this tool to:
+- Load and explore the CSV data with pandas
+- Perform SQL queries (create SQLite in-memory database)
+- Calculate statistics, trends, correlations
+- Generate charts with matplotlib (use plt.show() to display)
+- Analyze patterns and anomalies
+
+Charts will be automatically captured when you use plt.show().`,
+        parameters: z.object({
+          code: z.string().describe('Python code to execute for analysis'),
+          reasoning: z.string().describe('Brief explanation of what this code does')
+        }),
+        execute: async ({ code, reasoning }) => {
+          console.log(`\n🐍 Python: ${reasoning}`);
+          
+          const execution = await sandbox.notebook.execCell(code);
+          
+          if (execution.error) {
+            console.error(`   ❌ Error: ${execution.error.value}`);
+            return {
+              success: false,
+              error: execution.error.value,
+              traceback: execution.error.traceback
+            };
+          }
+          
+          // Collect charts from this execution
+          for (const result of execution.results) {
+            if (result.png) {
+              allCharts.push(Buffer.from(result.png, 'base64'));
+              console.log(`   📊 Chart captured`);
+            }
+          }
+          
+          console.log(`   ✅ Success`);
+          
+          // Return execution results
+          const textResults = execution.results
+            .filter((r: any) => r.text)
+            .map((r: any) => r.text)
+            .join('\n');
+          
+          return {
+            success: true,
+            output: execution.logs.stdout.join('\n') || textResults || 'Code executed successfully',
+            charts_generated: execution.results.filter((r: any) => r.png).length
+          };
+        }
+      }),
+      
+      search_web_with_exa: tool({
+        description: `Search the web using Exa AI to find external context.
+        
+Use ONLY when you need information NOT in the CSV:
+- Explaining WHY specific trends occurred (e.g., "why did sales drop in September?")
+- Industry events, news, or market conditions
+- External factors affecting the data
+- Context for anomalies
+
+DO NOT use for information derivable from the data itself.`,
+        parameters: z.object({
+          query: z.string().describe('Search query for external context'),
+          numResults: z.number().default(3).describe('Number of results (default: 3)')
+        }),
+        execute: async ({ query, numResults }) => {
+          console.log(`\n🌐 Exa search: ${query}`);
+          
+          // For now, use a simple web search placeholder
+          // TODO: Integrate Exa properly via MCP when available
+          const searchCode = `
+# Web search: ${query.replace(/'/g, "\\'")}
+print("Web search functionality coming soon!")
+print("Query: ${query.replace(/'/g, "\\'")}")
+print("Note: Focus on insights from the CSV data for now.")
+`;
+          
+          const execution = await sandbox.notebook.execCell(searchCode);
+          
+          if (execution.error) {
+            console.error(`   ❌ Search failed: ${execution.error.value}`);
+            return {
+              success: false,
+              error: execution.error.value
+            };
+          }
+          
+          const output = execution.logs.stdout.join('\n');
+          console.log(`   ✅ Search completed`);
+          
+          return {
+            success: true,
+            results: output || 'Search completed'
+          };
+        }
+      })
+    };
+
+    // System prompt for the AI agent
+    const systemPrompt = `You are an expert data analyst AI. You have a CSV file at ${csvPath} in an E2B Python sandbox.
+
+**ANALYSIS WORKFLOW:**
+
+1. **Load & Explore** - Use pandas to load CSV and understand structure:
+   \`\`\`python
+   import pandas as pd
+   df = pd.read_csv('${csvPath}')
+   print(df.head())
+   print(df.info())
+   print(df.describe())
+   \`\`\`
+
+2. **SQL Analysis** - Convert to SQLite for complex queries:
+   \`\`\`python
+   import sqlite3
+   conn = sqlite3.connect(':memory:')
+   df.to_sql('data', conn, index=False)
+   result = pd.read_sql("SELECT * FROM data WHERE value > 100", conn)
+   print(result)
+   \`\`\`
+
+3. **Statistics** - Calculate trends, correlations, detect anomalies
+
+4. **Visualizations** - Create charts with matplotlib:
+   \`\`\`python
+   import matplotlib.pyplot as plt
+   plt.figure(figsize=(10, 6))
+   plt.plot(df['date'], df['sales'])
+   plt.title('Sales Over Time')
+   plt.show()  # This captures the chart!
+   \`\`\`
+
+5. **Web Research** - ONLY when external context is needed (use sparingly!)
+
+**IMPORTANT:**
+- Execute 8-12 analysis steps for comprehensive insights
+- Always use plt.show() to display charts (they're auto-captured)
+- Quote actual numbers and percentages
+- Explain the "why" behind patterns
+- Use web search only for external events/context
+
+**USER REQUEST:** ${input.userMessage}
+
+Perform a thorough analysis!`;
+
+    // Run multi-step agent
+    console.log('\n🤖 Starting multi-step AI analysis...\n');
+    
+    const result = await generateText({
+      model: groq('gpt-oss-120b') as any,
+      tools,
+      maxSteps: 15,
+      system: systemPrompt,
+      prompt: input.userMessage,
+      onStepFinish: (step: any) => {
+        const stepNum = step.stepIndex !== undefined ? step.stepIndex + 1 : 'N';
+        console.log(`\n📍 Step ${stepNum}`);
+        if (step.text) {
+          const preview = step.text.substring(0, 120);
+          console.log(`   💭 ${preview}${step.text.length > 120 ? '...' : ''}`);
+        }
+        if (step.toolCalls && step.toolCalls.length > 0) {
+          console.log(`   🔧 Tools: ${step.toolCalls.map((t: any) => t.toolName).join(', ')}`);
+        }
       }
-    }
-
-    // Install system dependencies (non-interactive)
-    console.log('\n🔧 Installing system dependencies (Docker, Node.js)...');
-    console.log('   This takes 60-90 seconds...\n');
-    
-    await sandbox.process.startAndWait({
-      cmd: 'DEBIAN_FRONTEND=noninteractive sudo -E apt-get update -qq',
-      onStdout: (data) => { process.stdout.write('.'); },
-      onStderr: () => {}
-    });
-    
-    await sandbox.process.startAndWait({
-      cmd: 'DEBIAN_FRONTEND=noninteractive sudo -E apt-get install -qq -y docker.io curl ca-certificates gnupg chromium fonts-liberation libnss3 libatk-bridge2.0-0 libgbm1',
-      onStdout: (data) => { process.stdout.write('.'); },
-      onStderr: () => {}
-    });
-    
-    console.log('\n   ✅ Docker and Chromium installed');
-    
-    // Start Docker daemon
-    console.log('🐳 Starting Docker daemon...');
-    await sandbox.process.start({
-      cmd: 'sudo dockerd',
-      onStdout: () => {},
-      onStderr: () => {}
-    });
-    
-    // Wait for Docker to be ready
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    console.log('   ✅ Docker daemon started');
-    
-    // Install Node.js from NodeSource
-    console.log('📦 Installing Node.js 20...');
-    await sandbox.process.startAndWait({
-      cmd: 'curl -fsSL https://deb.nodesource.com/setup_20.x | DEBIAN_FRONTEND=noninteractive sudo -E bash -',
-      onStdout: (data) => { process.stdout.write('.'); },
-      onStderr: () => {}
-    });
-    
-    await sandbox.process.startAndWait({
-      cmd: 'DEBIAN_FRONTEND=noninteractive sudo -E apt-get install -qq -y nodejs',
-      onStdout: (data) => { process.stdout.write('.'); },
-      onStderr: () => {}
-    });
-    
-    console.log('\n   ✅ Node.js installed');
-
-    // Verify installations
-    const nodeCheck = await sandbox.process.startAndWait({ cmd: 'node --version' });
-    const npmCheck = await sandbox.process.startAndWait({ cmd: 'npm --version' });
-    console.log(`   Node: ${nodeCheck.stdout?.trim()}`);
-    console.log(`   npm: ${npmCheck.stdout?.trim()}`);
-
-    // Install Node.js dependencies
-    console.log('\n📦 Installing npm packages...');
-    console.log('   This takes 2-3 minutes (installing puppeteer, better-sqlite3, etc.)...\n');
-    
-    await sandbox.process.startAndWait({
-      cmd: 'cd /home/user && DEBIAN_FRONTEND=noninteractive npm install --legacy-peer-deps --no-audit --no-fund',
-      onStdout: (data) => { process.stdout.write('.'); },
-      onStderr: () => {}
-    });
-    
-    console.log('\n   ✅ npm packages installed');
-
-    // Run the agent
-    console.log('\n🤖 Running multi-step agent...\n');
-    const agentProcess = await sandbox.process.start({
-      cmd: 'npx tsx /home/user/agent.ts',
-      cwd: '/home/user',
-      envVars: {
-        EXA_API_KEY: process.env.EXA_API_KEY || '',
-        GROQ_API_KEY: process.env.GROQ_API_KEY || '',
-        USER_MESSAGE: input.userMessage,
-        CONVERSATION_HISTORY: JSON.stringify(input.conversationHistory),
-        PUPPETEER_EXECUTABLE_PATH: '/usr/bin/chromium'
-      },
-      onStdout: (data) => console.log('Agent:', data),
-      onStderr: (data) => console.error('Agent Error:', data)
     });
 
-    const agentOutput = await agentProcess.wait();
-    if (agentOutput.exitCode !== 0) {
-      throw new Error(`Agent execution failed with exit code ${agentOutput.exitCode}`);
-    }
-    console.log('\n   ✅ Agent execution completed');
-
-    // Download generated PDF
-    console.log('📥 Downloading generated PDF...');
-    const pdfBuffer = await sandbox.filesystem.read('/home/user/report.pdf');
-
-    // Download insights JSON
-    console.log('📊 Retrieving insights...');
-    let insights: any = {};
-    try {
-      const insightsJson = await sandbox.filesystem.read('/home/user/insights.json');
-      insights = JSON.parse(insightsJson.toString());
-    } catch (error) {
-      console.warn('Could not read insights.json');
-    }
-
-    console.log('✅ E2B agent completed successfully\n');
+    console.log('\n✅ Analysis complete!\n');
+    console.log(`📊 Generated ${allCharts.length} chart(s)`);
 
     return {
-      pdfBuffer: Buffer.from(pdfBuffer),
-      insights,
-      summary: insights.summary || 'Analysis complete'
+      summary: result.text,
+      charts: allCharts,
+      insights: {
+        steps: result.steps?.length || 0,
+        analysis: result.text
+      }
     };
 
   } catch (error) {
     console.error('❌ E2B agent error:', error);
     throw error;
   } finally {
-    // Cleanup sandbox
     console.log('🧹 Cleaning up sandbox...');
     await sandbox.close();
   }
 }
-

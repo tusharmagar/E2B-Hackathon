@@ -45,7 +45,12 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
     // Install system dependencies
     console.log('🐳 Installing Docker and dependencies...');
     await sandbox.process.startAndWait('apt-get update');
-    await sandbox.process.startAndWait('apt-get install -y docker.io nodejs npm');
+    await sandbox.process.startAndWait('apt-get install -y docker.io curl');
+    
+    // Install Node.js from NodeSource
+    console.log('📦 Installing Node.js...');
+    await sandbox.process.startAndWait('curl -fsSL https://deb.nodesource.com/setup_20.x | bash -');
+    await sandbox.process.startAndWait('apt-get install -y nodejs');
     
     // Pull Exa MCP Docker image
     console.log('📥 Pulling Exa MCP Docker image...');

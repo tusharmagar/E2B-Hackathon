@@ -1,239 +1,173 @@
 import { Sandbox } from '@e2b/code-interpreter';
-import { generateText } from 'ai';
+import { generateText, tool } from 'ai';
 import { groq } from '@ai-sdk/groq';
-import { tool } from 'ai';
 import { z } from 'zod';
-import { E2BAgentInput, E2BAgentOutput } from './types.js';
+import { E2BAgentInput, E2BAgentOutput } from './types';
+
+// --- Types ---
+interface ExaSearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+// --- Helper Functions ---
+
+async function uploadCsvToSandbox(sandbox: Sandbox, csvBuffer: Buffer, csvPath: string) {
+  const copy = Uint8Array.from(csvBuffer); 
+  await sandbox.files.write(csvPath, copy.buffer);
+}
+
+async function callExa(query: string, numResults: number): Promise<ExaSearchResult[]> {
+  const apiKey = process.env.EXA_API_KEY;
+  if (!apiKey) {
+    console.warn('⚠️ EXA_API_KEY not found. Web search will return empty.');
+    return [];
+  }
+  
+  try {
+    const resp = await fetch('https://api.exa.ai/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey
+      },
+      body: JSON.stringify({ query, numResults, useAutoprompt: true })
+    });
+
+    if (!resp.ok) {
+      const body = await resp.text();
+      throw new Error(`Exa search failed: ${resp.status} ${body}`);
+    }
+
+    const data = (await resp.json()) as { results?: any[] };
+    return (data.results || []).map((r: any) => ({
+      title: r.title || 'Untitled',
+      url: r.url || '',
+      snippet: r.text || r.snippet || ''
+    }));
+  } catch (error) {
+    console.error('Exa API Error:', error);
+    return [];
+  }
+}
+
+// --- Main Agent Function ---
 
 export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput> {
-  console.log('🚀 Initializing E2B sandbox...');
-  
-  // Check API key
-  if (!process.env.E2B_API_KEY) {
-    throw new Error('E2B_API_KEY is not set in environment variables');
-  }
-  
-  console.log(`   Using E2B API key: ${process.env.E2B_API_KEY.substring(0, 10)}...`);
-  const templateId = process.env.E2B_TEMPLATE_ID?.trim();
-  if (templateId) {
-    console.log(`   Using E2B template: ${templateId}`);
-  }
-  
-  // Create sandbox with timeout and error handling
+  console.log('🚀 Initializing E2B Agent...');
+
+  // 1. Validate Critical Env Vars
+  if (!process.env.E2B_API_KEY) throw new Error('E2B_API_KEY is missing from environment variables');
+  if (!process.env.GROQ_API_KEY) console.warn('⚠️ GROQ_API_KEY is missing; Groq calls will fail.');
+
   let sandbox: Sandbox | undefined;
+
   try {
-    console.log('   Creating E2B Sandbox...');
-    const createStarted = Date.now();
-    const creationWarn = setTimeout(() => {
-      console.log('   ⏳ Still creating sandbox (cold start can take ~30-60s)...');
-    }, 20000);
-    const createOpts = {
+    // 2. Sandbox Creation with Strict Timeout (Fixes "Stuck" issue)
+    const templateId = process.env.E2B_TEMPLATE_ID?.trim() || 'base';
+    console.log(`   🏗️ Creating sandbox (Template: ${templateId})...`);
+
+    const startedAt = Date.now();
+    
+    // Race condition: If E2B takes longer than 45s, throw an error rather than hanging forever
+    const sandboxPromise = Sandbox.create(templateId, {
       apiKey: process.env.E2B_API_KEY,
-      timeoutMs: 300000, // 5 minutes sandbox lifetime
-      requestTimeoutMs: 120000, // allow extra time for cold starts
-    };
+      timeoutMs: 45_000, // E2B SDK timeout
+      requestTimeoutMs: 45_000
+    });
 
-    sandbox = templateId
-      ? await Sandbox.create(templateId, createOpts)
-      : await Sandbox.create(createOpts);
-    clearTimeout(creationWarn);
+    const timeoutPromise = new Promise<never>((_, reject) => 
+      setTimeout(() => reject(new Error('Sandbox creation timed out locally (45s)')), 45000)
+    );
 
-    const createSeconds = Math.round((Date.now() - createStarted) / 1000);
-    console.log(`   ✅ Sandbox created in ${createSeconds}s`);
-  } catch (error: any) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error('   ❌ Failed to create E2B sandbox:', message);
-    console.error('   ℹ️ Check E2B API key, credits, or template ID if configured.');
-    throw new Error(`E2B initialization failed: ${message}`);
-  }
+    sandbox = await Promise.race([sandboxPromise, timeoutPromise]);
 
-  try {
-    // Upload CSV to sandbox
-    console.log('📤 Uploading CSV to sandbox...');
+    if (!sandbox) throw new Error('Sandbox creation returned undefined');
+    
+    const setupTime = Math.round((Date.now() - startedAt) / 1000);
+    console.log(`   ✅ Sandbox ready in ${setupTime}s (ID: ${sandbox.sandboxId})`);
+
+    // 3. Upload Data
     const csvPath = '/home/user/data.csv';
-    const csvCopy = Uint8Array.from(input.csvBuffer);
-    await sandbox.files.write(csvPath, csvCopy.buffer);
-    console.log(`   ✅ CSV uploaded to ${csvPath}`);
+    console.log('   📤 Uploading CSV...');
+    await uploadCsvToSandbox(sandbox, input.csvBuffer, csvPath);
 
-    // Store all charts generated during analysis
+    // 4. Define Tools
     const allCharts: Buffer[] = [];
-
-    // Define tools that generate Python code
+    
     const tools = {
-      run_python_analysis: tool({
-        description: `Execute Python code for data analysis. 
-        
-The CSV file is already loaded at '${csvPath}'.
-You have access to: pandas, numpy, matplotlib, sqlite3, and all standard Python libraries.
-
-Use this tool to:
-- Load and explore the CSV data with pandas
-- Perform SQL queries (create SQLite in-memory database)
-- Calculate statistics, trends, correlations
-- Generate charts with matplotlib (use plt.show() to display)
-- Analyze patterns and anomalies
-
-Charts will be automatically captured when you use plt.show().`,
+      run_python: tool({
+        description: 'Run Python code. Use pandas for data analysis and matplotlib for charts (plt.show).',
         parameters: z.object({
-          code: z.string().describe('Python code to execute for analysis'),
-          reasoning: z.string().describe('Brief explanation of what this code does')
+          code: z.string().describe('The python code to execute'),
+          reasoning: z.string().describe('Why this code is being run')
         }),
         execute: async ({ code, reasoning }) => {
-          console.log(`\n🐍 Python: ${reasoning}`);
+          console.log(`   🐍 Python: ${reasoning}`);
           
-          const execution = await sandbox.runCode(code);
-          
-          if (execution.error) {
-            console.error(`   ❌ Error: ${execution.error.value}`);
-            return {
-              success: false,
-              error: execution.error.value,
-              traceback: execution.error.traceback
-            };
-          }
-          
-          // Collect charts from this execution
-          for (const result of execution.results) {
-            if (result.png) {
-              allCharts.push(Buffer.from(result.png, 'base64'));
-              console.log(`   📊 Chart captured`);
+          // Execute code in sandbox
+          const exec = await sandbox!.runCode(code);
+
+          // Capture Charts (base64 -> Buffer)
+          if (exec.results) {
+            for (const res of exec.results) {
+              if (res.png) {
+                allCharts.push(Buffer.from(res.png, 'base64'));
+                console.log('      📊 Chart captured');
+              }
             }
           }
-          
-          console.log(`   ✅ Success`);
-          
-          // Return execution results
-          const textResults = execution.results
-            .filter((r: any) => r.text)
-            .map((r: any) => r.text)
-            .join('\n');
-          
+
+          // Handle Runtime Errors
+          if (exec.error) {
+            console.error(`      ❌ Error: ${exec.error.name}: ${exec.error.value}`);
+            return { success: false, error: `${exec.error.name}: ${exec.error.value}` };
+          }
+
+          // Return Output
+          const stdout = exec.logs.stdout.join('\n');
+          const textResults = exec.results.map(r => r.text).filter(Boolean).join('\n');
           return {
             success: true,
-            output: execution.logs.stdout.join('\n') || textResults || 'Code executed successfully',
-            charts_generated: execution.results.filter((r: any) => r.png).length
+            output: stdout + '\n' + textResults
           };
         }
       }),
       
-      search_web_with_exa: tool({
-        description: `Search the web using Exa AI to find external context.
-        
-Use ONLY when you need information NOT in the CSV:
-- Explaining WHY specific trends occurred (e.g., "why did sales drop in September?")
-- Industry events, news, or market conditions
-- External factors affecting the data
-- Context for anomalies
-
-DO NOT use for information derivable from the data itself.`,
+      web_search: tool({
+        description: 'Search the web for external context (news, industry trends) using Exa.',
         parameters: z.object({
-          query: z.string().describe('Search query for external context'),
-          numResults: z.number().default(3).describe('Number of results (default: 3)')
+          query: z.string(),
         }),
-        execute: async ({ query, numResults }) => {
-          console.log(`\n🌐 Exa search: ${query}`);
-          
-          // For now, use a simple web search placeholder
-          // TODO: Integrate Exa properly via MCP when available
-          const searchCode = `
-# Web search: ${query.replace(/'/g, "\\'")}
-print("Web search functionality coming soon!")
-print("Query: ${query.replace(/'/g, "\\'")}")
-print("Note: Focus on insights from the CSV data for now.")
-`;
-          
-          const execution = await sandbox.runCode(searchCode);
-          
-          if (execution.error) {
-            console.error(`   ❌ Search failed: ${execution.error.value}`);
-            return {
-              success: false,
-              error: execution.error.value
-            };
-          }
-          
-          const output = execution.logs.stdout.join('\n');
-          console.log(`   ✅ Search completed`);
-          
-          return {
-            success: true,
-            results: output || 'Search completed'
-          };
+        execute: async ({ query }) => {
+          console.log(`   🌐 Searching: ${query}`);
+          const results = await callExa(query, 3);
+          return { success: true, results };
         }
       })
     };
 
-    // System prompt for the AI agent
-    const systemPrompt = `You are an expert data analyst AI. You have a CSV file at ${csvPath} in an E2B Python sandbox.
+    // 5. Run LLM with Groq
+    const systemPrompt = `You are an expert data analyst. 
+    The CSV is located at: ${csvPath}.
+    1. Always load the CSV using pandas first.
+    2. Create visualizations using matplotlib (plt.show()) when relevant.
+    3. Use 'web_search' only if you need external context not in the CSV.
+    4. Be concise.`;
 
-**ANALYSIS WORKFLOW:**
-
-1. **Load & Explore** - Use pandas to load CSV and understand structure:
-   \`\`\`python
-   import pandas as pd
-   df = pd.read_csv('${csvPath}')
-   print(df.head())
-   print(df.info())
-   print(df.describe())
-   \`\`\`
-
-2. **SQL Analysis** - Convert to SQLite for complex queries:
-   \`\`\`python
-   import sqlite3
-   conn = sqlite3.connect(':memory:')
-   df.to_sql('data', conn, index=False)
-   result = pd.read_sql("SELECT * FROM data WHERE value > 100", conn)
-   print(result)
-   \`\`\`
-
-3. **Statistics** - Calculate trends, correlations, detect anomalies
-
-4. **Visualizations** - Create charts with matplotlib:
-   \`\`\`python
-   import matplotlib.pyplot as plt
-   plt.figure(figsize=(10, 6))
-   plt.plot(df['date'], df['sales'])
-   plt.title('Sales Over Time')
-   plt.show()  # This captures the chart!
-   \`\`\`
-
-5. **Web Research** - ONLY when external context is needed (use sparingly!)
-
-**IMPORTANT:**
-- Execute 8-12 analysis steps for comprehensive insights
-- Always use plt.show() to display charts (they're auto-captured)
-- Quote actual numbers and percentages
-- Explain the "why" behind patterns
-- Use web search only for external events/context
-
-**USER REQUEST:** ${input.userMessage}
-
-Perform a thorough analysis!`;
-
-    // Run multi-step agent
-    console.log('\n🤖 Starting multi-step AI analysis...\n');
+    console.log('   🤖 Querying Groq (openai/gpt-oss-120b)...');
     
     const result = await generateText({
-      model: groq('gpt-oss-120b') as any,
-      tools,
-      maxSteps: 15,
+      // Cast to 'any' fixes the TS error caused by mismatched 'ai' SDK versions
+      model: groq('openai/gpt-oss-120b') as any,
       system: systemPrompt,
       prompt: input.userMessage,
-      onStepFinish: (step: any) => {
-        const stepNum = step.stepIndex !== undefined ? step.stepIndex + 1 : 'N';
-        console.log(`\n📍 Step ${stepNum}`);
-        if (step.text) {
-          const preview = step.text.substring(0, 120);
-          console.log(`   💭 ${preview}${step.text.length > 120 ? '...' : ''}`);
-        }
-        if (step.toolCalls && step.toolCalls.length > 0) {
-          console.log(`   🔧 Tools: ${step.toolCalls.map((t: any) => t.toolName).join(', ')}`);
-        }
-      }
+      tools: tools,
+      maxSteps: 10, // Allow multi-step tool use
     });
 
-    console.log('\n✅ Analysis complete!\n');
-    console.log(`📊 Generated ${allCharts.length} chart(s)`);
+    console.log('   ✅ Analysis Complete');
 
     return {
       summary: result.text,
@@ -244,13 +178,13 @@ Perform a thorough analysis!`;
       }
     };
 
-  } catch (error) {
-    console.error('❌ E2B agent error:', error);
-    throw error;
+  } catch (err) {
+    console.error('   ❌ Critical Agent Error:', err);
+    throw err;
   } finally {
     if (sandbox) {
-      console.log('🧹 Cleaning up sandbox...');
-      await sandbox.kill();
+      console.log('   🧹 Killing sandbox...');
+      await sandbox.kill(); 
     }
   }
 }

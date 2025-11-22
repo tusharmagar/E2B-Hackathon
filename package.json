@@ -2,24 +2,35 @@
   "name": "whatsapp-data-analyst-agent",
   "version": "1.0.0",
   "description": "WhatsApp-based Data Analyst Agent with E2B, Exa MCP, and Groq",
-  "main": "index.js",
-  "type": "module",
+  "private": true,
   "scripts": {
-    "build": "echo 'Build skipped - Vercel handles TypeScript'",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
     "deploy": "vercel"
   },
   "dependencies": {
-    "@ai-sdk/groq": "^2.0.31",
-    "@e2b/code-interpreter": "^1.5.1",
+    "@ai-sdk/groq": "latest",
+    "@e2b/code-interpreter": "latest",
     "@vercel/blob": "^0.23.0",
-    "ai": "^3.4.0",
+    "ai": "latest",
+    "dotenv": "^17.2.3",
+    "next": "latest",
     "puppeteer": "^21.0.0",
+    "react": "latest",
+    "react-dom": "latest",
     "twilio": "^5.0.0",
-    "typescript": "^5.3.3",
-    "zod": "^3.22.4"
+    "zod": "latest"
   },
   "devDependencies": {
-    "@types/node": "^20.10.0",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "latest",
     "vercel": "^48.10.10"
   }
 }

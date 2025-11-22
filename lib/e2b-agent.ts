@@ -8,11 +8,31 @@ import { E2BAgentInput, E2BAgentOutput } from './types.js';
 export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput> {
   console.log('🚀 Initializing E2B sandbox...');
   
-  // Create sandbox (E2B Code Interpreter has Python pre-installed)
-  const sandbox = await CodeInterpreter.create({
-    apiKey: process.env.E2B_API_KEY,
-    timeout: 300000 // 5 minutes
-  });
+  // Check API key
+  if (!process.env.E2B_API_KEY) {
+    throw new Error('E2B_API_KEY is not set in environment variables');
+  }
+  
+  console.log(`   Using E2B API key: ${process.env.E2B_API_KEY.substring(0, 10)}...`);
+  
+  // Create sandbox with timeout and error handling
+  let sandbox;
+  try {
+    console.log('   Creating CodeInterpreter sandbox...');
+    sandbox = await Promise.race([
+      CodeInterpreter.create({
+        apiKey: process.env.E2B_API_KEY,
+        timeout: 300000 // 5 minutes
+      }),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('E2B sandbox creation timed out after 30 seconds')), 30000)
+      )
+    ]);
+    console.log('   ✅ Sandbox created successfully');
+  } catch (error: any) {
+    console.error('   ❌ Failed to create E2B sandbox:', error.message);
+    throw new Error(`E2B initialization failed: ${error.message}`);
+  }
 
   try {
     // Upload CSV to sandbox

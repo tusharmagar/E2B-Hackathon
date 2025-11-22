@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/groq": "^2.0.31",
-    "@e2b/code-interpreter": "^0.0.5",
+    "@e2b/code-interpreter": "^1.0.0",
     "@vercel/blob": "^0.23.0",
     "ai": "^3.4.0",
     "puppeteer": "^21.0.0",

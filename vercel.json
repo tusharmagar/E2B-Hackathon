@@ -1,0 +1,17 @@
+{
+  "functions": {
+    "api/webhook.ts": {
+      "maxDuration": 300
+    }
+  },
+  "env": {
+    "TWILIO_ACCOUNT_SID": "@twilio-account-sid",
+    "TWILIO_AUTH_TOKEN": "@twilio-auth-token",
+    "TWILIO_WHATSAPP_NUMBER": "@twilio-whatsapp-number",
+    "E2B_API_KEY": "@e2b-api-key",
+    "GROQ_API_KEY": "@groq-api-key",
+    "EXA_API_KEY": "@exa-api-key",
+    "BLOB_READ_WRITE_TOKEN": "@blob-read-write-token"
+  }
+}
+

@@ -146,45 +146,6 @@ app/api/webhook/route.ts  # Twilio webhook handler
 
 ---
 
-## 🎯 Why This Matters
-
-**For Small Businesses:**  
-Raw data exports are useless without analysis skills. Dash Reports makes insights accessible to everyone.
-
-**For the Hackathon:**
-- 🔐 **E2B** provides secure, isolated execution
-- 🌐 **Exa MCP** adds real-world context automatically
-- 🤖 **Multi-step agent** ensures thorough analysis
-- 📱 **WhatsApp** removes all friction
-
----
-
-## 💡 Example Use Case
-
-```
-[Send: bookings_march.csv]
-
-"Why did bookings drop so much?"
-```
-
-**Dash Reports analyzes** and might discover:
-- 40% drop in March compared to February
-- Uses Exa MCP to search news
-- Finds: "Local festival cancelled due to weather"
-- Sends back PDF with context
-
-**My mom finally understands her data.**
-
----
-
-## 🔗 Links
-
-📺 **Demo Video**: [https://youtu.be/M0tcMI92-yg](https://youtu.be/M0tcMI92-yg)  
-📚 **E2B Docs**: [e2b.dev/docs](https://e2b.dev/docs)  
-🏆 **Hackathon**: [E2B MCP Agents Hackathon](https://luma.com/0vm36r4q?tk=QxjbLk)
-
----
-
 <div align="center">
 
 **Built with ❤️ for the E2B Hackathon**

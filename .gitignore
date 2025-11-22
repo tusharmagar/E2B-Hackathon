@@ -9,5 +9,7 @@ dist/
 .DS_Store
 *.pdf
 *.csv
+*.png
 
-]
+# Allow architecture diagram
+!Arc-diagram.png

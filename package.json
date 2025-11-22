@@ -15,7 +15,7 @@
     "@ai-sdk/openai": "^2.0.71",
     "@e2b/code-interpreter": "latest",
     "@vercel/blob": "^0.23.0",
-    "ai": "latest",
+    "ai": "^5.0.99",
     "dotenv": "^17.2.3",
     "next": "latest",
     "openai": "^4.104.0",
@@ -34,5 +34,13 @@
     "tailwindcss": "^3.4.17",
     "typescript": "latest",
     "vercel": "^48.10.10"
+  },
+  "overrides": {
+    "esbuild": "0.25.12",
+    "jsondiffpatch": "0.7.3",
+    "path-to-regexp": "6.3.0",
+    "undici": "5.29.0",
+    "tar-fs": "3.1.1",
+    "ws": "8.18.3"
   }
 }

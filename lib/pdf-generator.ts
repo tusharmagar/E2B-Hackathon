@@ -1,30 +1,138 @@
 // generatePDF.ts
 import puppeteer from 'puppeteer';
+import { ReportData } from './types';
 
 export interface PDFGenerationInput {
   summary: string;
   charts: Buffer[];
   externalContext?: string;
+  structuredReport?: ReportData;
 }
 
 export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
   console.log('📄 Generating PDF report...');
 
-  // Split summary into paragraphs for pairing with charts
-  const rawParagraphs = input.summary
-    .split(/\n\s*\n/) // blank-line separated
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
-
-  const paragraphs = rawParagraphs.map((p) => escapeHtml(p));
   const chartCount = input.charts.length;
 
-  const pairedCount = Math.min(paragraphs.length, chartCount);
-  const unpairedText = paragraphs.slice(pairedCount);
-  const unpairedCharts = input.charts.slice(pairedCount);
+  // --------- Helper parsers to keep card content reliable ---------
+  const normalize = (txt: string) =>
+    txt.replace(/\s+/g, ' ').trim();
+
+  const extractExecSummary = (summary: string): string => {
+    const blocks = summary
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (!blocks.length) return summary.trim();
+    // Prefer the very first paragraph before any heading
+    return blocks[0];
+  };
+
+  const extractKpis = (summary: string): string[] => {
+    const lines = summary.split('\n');
+    const kpiStart = lines.findIndex((l) =>
+      /key\s*kpis?/i.test(l),
+    );
+    const kpis: string[] = [];
+    for (let i = kpiStart + 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      if (/^chart\s+\d+/i.test(line) || /external context/i.test(line) || /next steps/i.test(line)) break;
+      if (line.startsWith('-') || line.startsWith('•')) {
+        kpis.push(normalize(line.replace(/^[-•]\s*/, '')));
+      }
+      if (kpis.length >= 6) break;
+    }
+    return kpis;
+  };
+
+  const extractChartSummaries = (summary: string, count: number): string[] => {
+    const chartSummaries = new Array(count).fill('');
+    const regex = /chart\s+(\d+)[^\n]*\n([\s\S]*?)(?=\nchart\s+\d+|\nexternal context|\nnext steps|\nkey kpis|$)/gi;
+    let match;
+    while ((match = regex.exec(summary)) !== null) {
+      const idx = parseInt(match[1], 10) - 1;
+      if (idx >= 0 && idx < count) {
+        const content = match[2]
+          .split('\n')
+          .map((l) => l.replace(/^[-•]\s*/, '').trim())
+          .filter(Boolean)
+          .join(' ');
+        if (content) chartSummaries[idx] = normalize(content);
+      }
+    }
+
+    // Fallback: pull remaining paragraphs for any empty slots
+    const paragraphs = summary
+      .split(/\n\s*\n/)
+      .map((p) => normalize(p))
+      .filter((p) => p.length > 0);
+    let pIdx = 0;
+    for (let i = 0; i < chartSummaries.length; i++) {
+      if (!chartSummaries[i]) {
+        while (pIdx < paragraphs.length && (paragraphs[pIdx].toLowerCase().includes('key kpi') || paragraphs[pIdx].toLowerCase().startsWith('chart '))) {
+          pIdx++;
+        }
+        chartSummaries[i] =
+          paragraphs[pIdx] ||
+          `Chart ${i + 1}: summary unavailable.`;
+        pIdx++;
+      }
+    }
+    return chartSummaries;
+  };
+
+  const extractAdditional = (summary: string): string[] => {
+    const blocks = summary
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .filter(
+        (p) =>
+          !/^chart\s+\d+/i.test(p) &&
+          !/key\s*kpis?/i.test(p) &&
+          !/external context/i.test(p) &&
+          !/next steps/i.test(p),
+      );
+    return blocks.slice(0, 6);
+  };
+
+  const sr = input.structuredReport;
+
+  const execSummary = sr
+    ? escapeHtml(sr.summary || input.summary)
+    : escapeHtml(extractExecSummary(input.summary));
+
+  const rawChartSummaries = sr
+    ? sr.charts.map((c, idx) =>
+        normalize(
+          `${c.title || `Chart ${idx + 1}`}: ${(c.bullets || []).join(' ')}`,
+        ),
+      )
+    : extractChartSummaries(input.summary, chartCount);
+
+  // Align chart summaries to actual chart count
+  const chartSummaries = Array.from({ length: chartCount }, (_, i) => {
+    if (rawChartSummaries[i]) return rawChartSummaries[i];
+    return `Chart ${i + 1}: summary unavailable.`;
+  });
+
+  const additionalText = (sr?.additionalDetails || extractAdditional(input.summary)).map(
+    (p) => escapeHtml(p),
+  );
+
+  const kpiLines = (sr?.kpis || extractKpis(input.summary)).map(escapeHtml);
+
+  const externalContextText =
+    (sr?.externalContext && sr.externalContext.join('\n\n')) ||
+    input.externalContext ||
+    '';
+
+  const pairedCount = chartCount;
+  const unpairedCharts: Buffer[] = [];
 
   const pairedBlocks = Array.from({ length: pairedCount }, (_, i) => {
-    const para = paragraphs[i];
+    const para = escapeHtml(chartSummaries[i] || `Chart ${i + 1} summary`);
     const chart = input.charts[i];
     return `
       <div class="row">
@@ -44,7 +152,8 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
     `;
   }).join('');
 
-  const remainingTextHtml = unpairedText
+  const MAX_EXTRA_PARAGRAPHS = 6;
+  const remainingTextHtml = additionalText.slice(0, MAX_EXTRA_PARAGRAPHS)
     .map(
       (p) => `
     <p class="extra-paragraph">
@@ -67,8 +176,19 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
     )
     .join('');
 
-  const externalContextHtml = input.externalContext
-    ? input.externalContext
+  const kpiCardsHtml = kpiLines
+    .map(
+      (line, idx) => `
+        <div class="kpi-card">
+          <div class="kpi-title">KPI ${idx + 1}</div>
+          <div class="kpi-value">${line}</div>
+        </div>
+      `,
+    )
+    .join('');
+
+  const externalContextHtml = externalContextText
+    ? externalContextText
         .split(/\n\s*\n/)
         .map(
           (p) =>
@@ -85,31 +205,39 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
   <meta charset="UTF-8" />
   <title>Data Analysis Report</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
+    :root {
+      --ink: #0b0b0b;
+      --bg: #f6f6f2;
+      --card: #ffffff;
+      --accent: #ffe066;
+      --mint: #d2f5d0;
+      --blue: #d7e9ff;
+      --peach: #ffd7a3;
+      --shadow: 10px 10px 0 var(--ink);
     }
 
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    @page { margin: 14mm; }
+
     body {
-      font-family: "IBM Plex Mono", "Courier New", monospace;
-      background: #f2f2f2;
-      padding: 40px;
-      color: #000000;
+      font-family: "IBM Plex Mono", "JetBrains Mono", "Courier New", monospace;
+      background: var(--bg);
+      padding: 18px;
+      color: var(--ink);
     }
 
     .container {
-      max-width: 840px;
+      max-width: 880px;
       margin: 0 auto;
-      background: #ffffff;
-      border: 5px solid #000000;
-      box-shadow: 12px 12px 0 #000000;
+      background: var(--card);
+      border: 5px solid var(--ink);
+      box-shadow: var(--shadow);
     }
 
     .header {
-      background: #ffeb3b;
-      border-bottom: 5px solid #000000;
-      padding: 28px 32px 20px;
+      background: var(--accent);
+      border-bottom: 5px solid var(--ink);
+      padding: 26px 32px 18px;
     }
 
     .header-inner {
@@ -120,24 +248,23 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
     }
 
     h1 {
-      font-size: 32px;
+      font-size: 30px;
       font-weight: 900;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.06em;
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
+      color: var(--ink);
+      text-transform: uppercase;
     }
 
-    h1 .icon {
-      font-size: 30px;
-    }
+    h1 .icon { font-size: 28px; }
 
     .subtitle {
       font-size: 12px;
-      margin-top: 10px;
-      max-width: 380px;
-      line-height: 1.4;
+      margin-top: 8px;
+      max-width: 440px;
+      line-height: 1.5;
     }
 
     .header-tags {
@@ -152,60 +279,54 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      background: #000000;
+      background: var(--ink);
       color: #ffffff;
-      padding: 4px 12px;
+      padding: 6px 12px;
       border-radius: 999px;
-      border: 2px solid #000000;
+      border: 3px solid var(--ink);
       text-transform: uppercase;
       letter-spacing: 0.12em;
-      font-weight: 700;
+      font-weight: 800;
+      box-shadow: 4px 4px 0 var(--ink);
     }
 
     .pill .dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 999px;
-      background: #e2ff2e;
-      box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.9);
+      width: 8px; height: 8px; border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 0 2px #ffffff;
     }
 
     .pill-secondary {
-      background: #ffffff;
-      color: #000000;
+      background: var(--card);
+      color: var(--ink);
     }
 
-    .generated-date {
-      font-size: 11px;
-      margin-top: 2px;
-    }
+    .generated-date { font-size: 11px; margin-top: 2px; }
 
-    .content {
-      padding: 32px 32px 24px;
-    }
+    .content { padding: 26px 26px 22px; }
 
     .section {
-      margin-bottom: 32px;
+      margin-bottom: 26px;
       page-break-inside: avoid;
       break-inside: avoid;
     }
 
     .section-title {
-      font-size: 16px;
-      font-weight: 800;
+      font-size: 15px;
+      font-weight: 900;
       text-transform: uppercase;
-      letter-spacing: 0.16em;
-      margin-bottom: 14px;
-      border-bottom: 3px solid #000000;
-      padding-bottom: 4px;
+      letter-spacing: 0.14em;
+      margin-bottom: 12px;
+      border-bottom: 3px solid var(--ink);
+      padding-bottom: 5px;
       display: inline-block;
     }
 
     .summary-card {
-      background: #e8f5e9;
-      border: 3px solid #000000;
+      background: linear-gradient(135deg, var(--mint), var(--blue));
+      border: 4px solid var(--ink);
       padding: 18px 18px 16px;
-      box-shadow: 6px 6px 0 #000000;
+      box-shadow: var(--shadow);
       font-size: 13px;
       line-height: 1.6;
       white-space: pre-wrap;
@@ -213,112 +334,99 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
       break-inside: avoid;
     }
 
-    .summary-card p + p {
-      margin-top: 8px;
-    }
+    .summary-card p + p { margin-top: 8px; }
+    .summary-card strong { font-weight: 800; }
 
-    .summary-card strong {
-      font-weight: 700;
-    }
+    .paired-section { margin-top: 4px; }
 
-    .paired-section {
-      margin-top: 4px;
+    .paired-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 14px;
     }
 
     .row {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 18px;
-      margin-bottom: 22px;
+      grid-template-columns: minmax(240px, 1fr) minmax(340px, 1fr);
+      gap: 10px;
       align-items: stretch;
       page-break-inside: avoid;
       break-inside: avoid;
     }
 
     .row-text,
-    .row-chart {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-    }
+    .row-chart { display: flex; flex-direction: column; }
 
     .row-text {
-      background: #ffffff;
-      border-radius: 0;
-      border: 3px solid #000000;
+      background: #fffef6;
+      border: 3px solid var(--ink);
       padding: 14px 14px 12px;
       font-size: 13px;
       line-height: 1.6;
-      box-shadow: 5px 5px 0 #000000;
+      box-shadow: 6px 6px 0 var(--ink);
+      min-height: 240px;
       page-break-inside: avoid;
       break-inside: avoid;
     }
 
     .row-subtitle {
       font-size: 11px;
-      font-weight: 800;
+      font-weight: 900;
       text-transform: uppercase;
       letter-spacing: 0.18em;
       margin-bottom: 6px;
-      border-bottom: 2px solid #000000;
+      border-bottom: 3px solid var(--ink);
       display: inline-block;
       padding-bottom: 2px;
     }
 
-    .row-text p {
-      margin-top: 4px;
-    }
+    .row-text p { margin-top: 4px; }
 
     .chart-card {
-      background: #ffffff;
-      border-radius: 0;
-      border: 3px solid #000000;
-      padding: 10px 10px 8px;
-      box-shadow: 5px 5px 0 #000000;
+      background: var(--card);
+      border: 3px solid var(--ink);
+      padding: 8px 8px 6px;
+      box-shadow: 6px 6px 0 var(--ink);
       display: flex;
       flex-direction: column;
+      min-height: 220px;
+      overflow: hidden;
       page-break-inside: avoid;
       break-inside: avoid;
     }
 
-    .chart-card-small {
-      max-width: 360px;
-    }
+    .chart-card-small { max-width: 360px; }
 
     .chart-title {
       font-size: 11px;
-      font-weight: 800;
+      font-weight: 900;
       text-transform: uppercase;
       letter-spacing: 0.16em;
       text-align: center;
-      margin-bottom: 6px;
-      border-bottom: 2px solid #000000;
-      padding-bottom: 2px;
+      margin-bottom: 4px;
+      border-bottom: 2px solid var(--ink);
+      padding-bottom: 3px;
     }
 
     .chart-card img {
       width: 100%;
-      height: auto;
+      height: 150px;
       display: block;
       object-fit: contain;
-      max-height: 320px;
     }
 
-    .extra-text-section {
-      margin-top: 12px;
-    }
+    .extra-text-section { margin-top: 10px; column-count: 2; column-gap: 18px; }
 
     .extra-paragraph {
-      font-size: 13px;
-      line-height: 1.6;
-      margin-bottom: 12px;
-      border-left: 3px solid #000000;
+      font-size: 12.5px;
+      line-height: 1.5;
+      margin-bottom: 10px;
+      border-left: 4px solid var(--ink);
       padding-left: 10px;
+      break-inside: avoid;
     }
 
-    .extra-paragraph:last-child {
-      margin-bottom: 0;
-    }
+    .extra-paragraph:last-child { margin-bottom: 0; }
 
     .extra-charts-section {
       margin-top: 8px;
@@ -328,22 +436,54 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
     }
 
     .external-context {
-      background: #fff8e1;
-      border: 3px solid #000000;
+      background: var(--peach);
+      border: 3px solid var(--ink);
       padding: 14px 14px 12px;
-      box-shadow: 6px 6px 0 #000000;
+      box-shadow: var(--shadow);
       font-size: 13px;
       line-height: 1.6;
       page-break-inside: avoid;
       break-inside: avoid;
     }
 
-    .external-context p + p {
+    .external-context p + p { margin-top: 8px; }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
       margin-top: 8px;
+      margin-bottom: 10px;
+    }
+
+    .kpi-card {
+      background: #fffef6;
+      border: 3px solid var(--ink);
+      padding: 12px 12px 10px;
+      box-shadow: 6px 6px 0 var(--ink);
+      font-size: 13px;
+      line-height: 1.4;
+      min-height: 78px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .kpi-title {
+      font-weight: 900;
+      letter-spacing: 0.12em;
+      font-size: 11px;
+      text-transform: uppercase;
+      border-bottom: 2px solid var(--ink);
+      padding-bottom: 4px;
+    }
+
+    .kpi-value {
+      font-weight: 600;
     }
 
     .footer {
-      background: #000000;
+      background: var(--ink);
       color: #ffffff;
       padding: 16px 24px;
       font-size: 11px;
@@ -351,12 +491,10 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
       align-items: center;
       justify-content: space-between;
       gap: 10px;
-      border-top: 4px solid #000000;
+      border-top: 5px solid var(--ink);
     }
 
-    .footer span {
-      opacity: 0.95;
-    }
+    .footer span { opacity: 0.95; }
 
     .footer-tags {
       display: flex;
@@ -367,13 +505,14 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
     }
 
     .footer-pill {
-      padding: 3px 9px;
-      border-radius: 999px;
-      border: 2px solid #ffffff;
-      background: #ffeb3b;
-      color: #000000;
-      font-weight: 800;
+      padding: 5px 10px;
+      border-radius: 6px;
+      border: 3px solid #ffffff;
+      background: var(--accent);
+      color: var(--ink);
+      font-weight: 900;
       font-size: 10px;
+      box-shadow: 4px 4px 0 #000000;
     }
   </style>
 </head>
@@ -408,12 +547,25 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
         <div class="section-title">Executive Summary</div>
         <div class="summary-card">
           ${
-            paragraphs.length > 0
-              ? `<p>${paragraphs[0]}</p>`
+            execSummary
+              ? `<p>${execSummary}</p>`
               : `<p>${escapeHtml(input.summary)}</p>`
           }
         </div>
       </div>
+
+      ${
+        kpiCardsHtml
+          ? `
+      <div class="section">
+        <div class="section-title">Key Numbers</div>
+        <div class="kpi-grid">
+          ${kpiCardsHtml}
+        </div>
+      </div>
+      `
+          : ''
+      }
 
       ${
         externalContextHtml
@@ -434,7 +586,9 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
           ? `
       <div class="section paired-section">
         <div class="section-title">Key Insights & Visualizations</div>
-        ${pairedBlocks}
+        <div class="paired-grid">
+          ${pairedBlocks}
+        </div>
       </div>
       `
           : ''
@@ -442,7 +596,7 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
 
       <!-- Remaining narrative -->
       ${
-        unpairedText.length > 0
+        additionalText.length > 0
           ? `
       <div class="section extra-text-section">
         <div class="section-title">Additional Details</div>

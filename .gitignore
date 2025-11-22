@@ -7,7 +7,6 @@ dist/
 .next/
 *.log
 .DS_Store
-*.pdf
 *.csv
 *.png
 

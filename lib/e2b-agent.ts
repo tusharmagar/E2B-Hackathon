@@ -2,7 +2,12 @@
 import { Sandbox } from '@e2b/code-interpreter';
 import { Sandbox as SandboxMCP } from 'e2b';
 import OpenAI from 'openai';
-import { E2BAgentInput, E2BAgentOutput, Message } from './types';
+import {
+  E2BAgentInput,
+  E2BAgentOutput,
+  Message,
+  ReportData,
+} from './types';
 
 // -------------------- Type Extensions for MCP --------------------
 // MCP helpers are relatively new; TS types may lag the runtime.
@@ -96,6 +101,46 @@ function extractUrls(text: string): string[] {
   const regex = /(https?:\/\/[^\s]+)/g;
   const matches = text.match(regex);
   return matches ? Array.from(new Set(matches)) : [];
+}
+
+function parseStructuredReport(text: string): ReportData | undefined {
+  if (!text) return undefined;
+  let cleaned = text.trim();
+  cleaned = cleaned.replace(/^```(?:json)?\n?/, '').replace(/```$/, '').trim();
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (!parsed || typeof parsed !== 'object') return undefined;
+
+    const coerceArray = (v: any) =>
+      Array.isArray(v) ? v.map((x) => String(x)) : [];
+
+    const charts = Array.isArray((parsed as any).charts)
+      ? (parsed as any).charts.map((c: any, idx: number) => ({
+          title: String(c?.title || `Chart ${idx + 1}`),
+          bullets: coerceArray(c?.bullets),
+        }))
+      : [];
+
+    const report: ReportData = {
+      summary: String((parsed as any).summary || ''),
+      kpis: coerceArray((parsed as any).kpis),
+      charts,
+      externalContext:
+        coerceArray((parsed as any).externalContext) ||
+        coerceArray((parsed as any).external_context),
+      nextSteps:
+        coerceArray((parsed as any).nextSteps) ||
+        coerceArray((parsed as any).next_steps),
+      additionalDetails:
+        coerceArray((parsed as any).additionalDetails) ||
+        coerceArray((parsed as any).additional_details),
+    };
+
+    return report;
+  } catch (err) {
+    return undefined;
+  }
 }
 
 /**
@@ -385,18 +430,28 @@ STRICT WORKFLOW:
      - Incorporate any relevant definitions, benchmarks, or domain context into your analysis and final report.
      - Where useful, compare your computed KPIs against any benchmarks mentioned.
 
-5. FINAL REPORT (MANDATORY)
-   - Only after charts exist:
-     - Write a detailed report with key findings.
-     - Include a dedicated **"Key KPIs"** subsection near the top, listing the most important metrics as bullet points with numbers.
-     - For each chart, include a clearly labeled subsection:
-       - "Chart 1 – [Title]"
-       - "Chart 2 – [Title]"
-       - "Chart 3 – [Title]"
-     - In each subsection, describe:
-       - What the chart shows,
-       - The main numeric insights (e.g., levels, trends, outliers),
-       - Any connection to the external context/benchmarks when relevant.
+5. FINAL REPORT (MANDATORY, CONCISE & STRUCTURED)
+   - Only after charts exist, produce a **short, structured report** with these sections (in order):
+     - **Key KPIs (4–7 bullets, numbers only, max 15 words each)**.
+     - **Chart 1 – [Title]** (2–3 bullets: what it shows, 1–2 numeric insights, 1 takeaway).
+     - **Chart 2 – [Title]** (same format).
+     - **Chart 3 – [Title]** (same format; if extra charts, include similarly but stay brief).
+     - **External Context** (only if provided; 2–4 bullets tying benchmarks/definitions to the data).
+     - **Next Steps** (3 bullets, action-oriented, <=15 words).
+   - You **must provide at least as many insight/chart blocks as charts generated**; never leave placeholders like “---”.
+   - Your final message MUST include the headings for every chart you generated (e.g., “Chart 1 – ...”, “Chart 2 – ...”, “Chart 3 – ...”) with 2–3 bullets each. If any are missing, do not stop; continue until they are present.
+   - Do **NOT** repeat the same numbers across sections. Avoid long paragraphs; keep everything in compact bullets.
+   - Keep the overall report tight—no filler sentences or redundant restatements.
+   - At the very end, return **ONLY valid JSON (no markdown fences)** with this schema:
+     {
+       "summary": string,
+       "kpis": string[],
+       "charts": [{"title": string, "bullets": string[]}],
+       "externalContext": string[],
+       "nextSteps": string[],
+       "additionalDetails": string[]
+     }
+     - Ensure arrays are the same length as the generated content (e.g., one chart entry per chart). No extra commentary.
 
 If you attempt to answer in natural language before generating charts, the orchestrator will ask you to continue.
 `.trim();
@@ -622,6 +677,12 @@ If you attempt to answer in natural language before generating charts, the orche
       break;
     }
 
+    let structuredReport = parseStructuredReport(finalSummary);
+
+    if (structuredReport && structuredReport.summary) {
+      finalSummary = structuredReport.summary;
+    }
+
     if (!finalSummary || finalSummary.length < 50) {
       console.warn(
         '   ⚠️ Final summary was empty or too short. Using fallback.',
@@ -636,6 +697,7 @@ If you attempt to answer in natural language before generating charts, the orche
       summary: finalSummary,
       charts: allCharts,
       externalContext,
+      structuredReport,
       insights: {
         steps: 'manual-chat-loop',
         analysis: finalSummary,

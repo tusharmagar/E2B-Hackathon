@@ -47,11 +47,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         userMessage = messageBody || 'Analyze this data and provide comprehensive insights';
         
-        // Send acknowledgment
+        // Send acknowledgment and return immediately
         await sendWhatsAppMessage(
           from,
-          '🤖 Received your CSV! Analyzing data...\n\nThis may take a few minutes. I\'m:\n• Converting to database\n• Running SQL queries\n• Detecting trends\n• Searching the web for context\n• Generating your report'
+          '🤖 Received your CSV! Analyzing data...\n\nThis will take 3-5 minutes. I\'m:\n• Setting up secure analysis environment\n• Converting to database\n• Running SQL queries\n• Detecting trends\n• Searching the web for context\n• Generating your report\n\nI\'ll send you the PDF when ready! ⏳'
         );
+        
+        // Return 200 immediately so Twilio doesn't retry
+        res.status(200).json({ success: true, message: 'Processing started' });
+        
+        // Continue processing asynchronously
+        processCSVAsync(from, csvBuffer, userMessage, session.conversationHistory).catch(error => {
+          console.error('Background processing error:', error);
+        });
+        
+        return;
+        
       } catch (error) {
         console.error('Error downloading CSV:', error);
         await sendWhatsAppMessage(from, '❌ Sorry, I couldn\'t download the CSV file. Please try again.');
@@ -77,16 +88,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       await sendWhatsAppMessage(
         from,
-        '🤖 Analyzing your request...\n\nProcessing with context from your previous CSV.'
+        '🤖 Analyzing your request...\n\nProcessing with context from your previous CSV. This will take a few minutes...'
       );
+      
+      // Return 200 immediately
+      res.status(200).json({ success: true, message: 'Processing started' });
+      
+      // Continue processing asynchronously
+      processCSVAsync(from, csvBuffer!, userMessage, session.conversationHistory).catch(error => {
+        console.error('Background processing error:', error);
+      });
+      
+      return;
     }
 
-    // Run E2B agent
-    console.log('🚀 Starting E2B agent...');
+  } catch (error) {
+    console.error('❌ Webhook error:', error);
+    
+    // Try to notify user of error
+    try {
+      const payload = req.body as TwilioWebhookPayload;
+      const from = extractPhoneNumber(payload.From);
+      await sendWhatsAppMessage(
+        from,
+        '❌ Sorry, something went wrong while analyzing your data. Please try again later.'
+      );
+    } catch (notifyError) {
+      console.error('Failed to notify user of error:', notifyError);
+    }
+
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+// Async processing function that continues after HTTP response
+async function processCSVAsync(
+  from: string, 
+  csvBuffer: Buffer, 
+  userMessage: string, 
+  conversationHistory: any[]
+) {
+  try {
+    console.log('🚀 Starting E2B agent (background)...');
     const result = await runE2BAgent({
-      csvBuffer: csvBuffer!,
+      csvBuffer,
       userMessage,
-      conversationHistory: session.conversationHistory
+      conversationHistory
     });
 
     // Upload PDF to Vercel Blob
@@ -100,18 +147,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     updateSession(from, {
       analysisResults: result.insights,
       conversationHistory: [
-        ...session.conversationHistory,
+        ...conversationHistory,
         { role: 'assistant', content: result.summary }
       ]
     });
 
     // Send PDF link to user
-    const responseMessage = `✅ *Analysis Complete!*\n\n${result.summary}\n\nYour detailed PDF report is ready 👇`;
+    const responseMessage = `✅ *Analysis Complete!*\n\n${result.summary}\n\n📊 Your detailed PDF report is ready 👇`;
     
     await sendWhatsAppMessage(from, responseMessage, blob.url);
 
     console.log('✨ Successfully sent report to user');
-    return res.status(200).json({ success: true, pdfUrl: blob.url });
+  } catch (error) {
+    console.error('❌ Background processing error:', error);
+    
+    try {
+      await sendWhatsAppMessage(
+        from,
+        '❌ Sorry, something went wrong while analyzing your data. The analysis environment setup took too long. Please try again or contact support.'
+      );
+    } catch (notifyError) {
+      console.error('Failed to notify user of background error:', notifyError);
+    }
+  }
+}
 
   } catch (error) {
     console.error('❌ Webhook error:', error);

@@ -1,4 +1,5 @@
-import { CodeInterpreter } from '@e2b/code-interpreter';
+import pkg from '@e2b/code-interpreter';
+const { Sandbox } = pkg;
 import { generateText } from 'ai';
 import { groq } from '@ai-sdk/groq';
 import { tool } from 'ai';
@@ -18,9 +19,9 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
   // Create sandbox with timeout and error handling
   let sandbox;
   try {
-    console.log('   Creating CodeInterpreter sandbox...');
+    console.log('   Creating E2B Sandbox...');
     sandbox = await Promise.race([
-      CodeInterpreter.create({
+      Sandbox.create({
         apiKey: process.env.E2B_API_KEY,
         timeout: 300000 // 5 minutes
       }),
@@ -37,8 +38,8 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
   try {
     // Upload CSV to sandbox
     console.log('📤 Uploading CSV to sandbox...');
-    const csvPath = '/home/user/data.csv';
-    await sandbox.filesystem.write(csvPath, input.csvBuffer.toString('utf-8'));
+    const csvPath = 'data.csv';
+    await sandbox.files.write(csvPath, input.csvBuffer);
     console.log(`   ✅ CSV uploaded to ${csvPath}`);
 
     // Store all charts generated during analysis
@@ -67,7 +68,7 @@ Charts will be automatically captured when you use plt.show().`,
         execute: async ({ code, reasoning }) => {
           console.log(`\n🐍 Python: ${reasoning}`);
           
-          const execution = await sandbox.notebook.execCell(code);
+          const execution = await sandbox.runCode(code);
           
           if (execution.error) {
             console.error(`   ❌ Error: ${execution.error.value}`);
@@ -128,7 +129,7 @@ print("Query: ${query.replace(/'/g, "\\'")}")
 print("Note: Focus on insights from the CSV data for now.")
 `;
           
-          const execution = await sandbox.notebook.execCell(searchCode);
+          const execution = await sandbox.runCode(searchCode);
           
           if (execution.error) {
             console.error(`   ❌ Search failed: ${execution.error.value}`);
@@ -234,7 +235,9 @@ Perform a thorough analysis!`;
     console.error('❌ E2B agent error:', error);
     throw error;
   } finally {
-    console.log('🧹 Cleaning up sandbox...');
-    await sandbox.close();
+    if (sandbox) {
+      console.log('🧹 Cleaning up sandbox...');
+      await sandbox.kill();
+    }
   }
 }

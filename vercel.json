@@ -1,7 +1,7 @@
 {
   "buildCommand": "",
   "functions": {
-    "api/webhook.ts": {
+    "app/api/webhook/route.ts": {
       "maxDuration": 300
     }
   }

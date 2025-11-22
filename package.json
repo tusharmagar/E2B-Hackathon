@@ -12,11 +12,13 @@
   },
   "dependencies": {
     "@ai-sdk/groq": "latest",
+    "@ai-sdk/openai": "^2.0.71",
     "@e2b/code-interpreter": "latest",
     "@vercel/blob": "^0.23.0",
     "ai": "latest",
     "dotenv": "^17.2.3",
     "next": "latest",
+    "openai": "^4.104.0",
     "puppeteer": "^21.0.0",
     "react": "latest",
     "react-dom": "latest",

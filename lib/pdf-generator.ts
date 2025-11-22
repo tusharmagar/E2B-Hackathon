@@ -1,3 +1,4 @@
+// generatePDF.ts
 import puppeteer from 'puppeteer';
 
 export interface PDFGenerationInput {
@@ -8,13 +9,69 @@ export interface PDFGenerationInput {
 export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
   console.log('📄 Generating PDF report...');
 
+  // Split summary into paragraphs for pairing with charts
+  const rawParagraphs = input.summary
+    .split(/\n\s*\n/) // blank-line separated
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+
+  const paragraphs = rawParagraphs.map((p) => escapeHtml(p));
+  const chartCount = input.charts.length;
+
+  const pairedCount = Math.min(paragraphs.length, chartCount);
+  const unpairedText = paragraphs.slice(pairedCount);
+  const unpairedCharts = input.charts.slice(pairedCount);
+
+  const pairedBlocks = Array.from({ length: pairedCount }, (_, i) => {
+    const para = paragraphs[i];
+    const chart = input.charts[i];
+    return `
+      <div class="row">
+        <div class="row-text">
+          <h3 class="row-subtitle">INSIGHT ${i + 1}</h3>
+          <p>${para}</p>
+        </div>
+        <div class="row-chart">
+          <div class="chart-card">
+            <div class="chart-title">CHART ${i + 1}</div>
+            <img src="data:image/png;base64,${chart.toString(
+              'base64',
+            )}" alt="Chart ${i + 1}" />
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const remainingTextHtml = unpairedText
+    .map(
+      (p) => `
+    <p class="extra-paragraph">
+      ${p}
+    </p>
+  `,
+    )
+    .join('');
+
+  const remainingChartsHtml = unpairedCharts
+    .map(
+      (chart, idx) => `
+      <div class="chart-card chart-card-small">
+        <div class="chart-title">EXTRA CHART ${pairedCount + idx + 1}</div>
+        <img src="data:image/png;base64,${chart.toString(
+          'base64',
+        )}" alt="Chart ${pairedCount + idx + 1}" />
+      </div>
+    `,
+    )
+    .join('');
+
   // Create HTML content
   const html = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
   <title>Data Analysis Report</title>
   <style>
     * {
@@ -22,154 +79,363 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
       padding: 0;
       box-sizing: border-box;
     }
-    
+
     body {
-      font-family: 'Courier New', monospace;
-      background: #f0f0f0;
+      font-family: "IBM Plex Mono", "Courier New", monospace;
+      background: #f2f2f2;
       padding: 40px;
-      color: #000;
+      color: #000000;
     }
-    
+
     .container {
-      max-width: 800px;
+      max-width: 840px;
       margin: 0 auto;
-      background: #fff;
-      border: 5px solid #000;
-      box-shadow: 10px 10px 0 #000;
+      background: #ffffff;
+      border: 5px solid #000000;
+      box-shadow: 12px 12px 0 #000000;
     }
-    
+
     .header {
       background: #ffeb3b;
-      border-bottom: 5px solid #000;
-      padding: 30px;
+      border-bottom: 5px solid #000000;
+      padding: 28px 32px 20px;
     }
-    
+
+    .header-inner {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
     h1 {
-      font-size: 36px;
-      font-weight: bold;
+      font-size: 32px;
+      font-weight: 900;
       text-transform: uppercase;
-      letter-spacing: 2px;
+      letter-spacing: 0.08em;
+      display: flex;
+      align-items: center;
+      gap: 12px;
     }
-    
+
+    h1 .icon {
+      font-size: 30px;
+    }
+
     .subtitle {
-      font-size: 14px;
+      font-size: 12px;
       margin-top: 10px;
-      opacity: 0.8;
+      max-width: 380px;
+      line-height: 1.4;
     }
-    
-    .content {
-      padding: 40px;
+
+    .header-tags {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+      font-size: 11px;
     }
-    
-    .section {
-      margin-bottom: 40px;
-    }
-    
-    .section-title {
-      font-size: 24px;
-      font-weight: bold;
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #000000;
+      color: #ffffff;
+      padding: 4px 12px;
+      border-radius: 999px;
+      border: 2px solid #000000;
       text-transform: uppercase;
-      margin-bottom: 20px;
-      padding-bottom: 10px;
-      border-bottom: 3px solid #000;
+      letter-spacing: 0.12em;
+      font-weight: 700;
     }
-    
-    .summary {
+
+    .pill .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #e2ff2e;
+      box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.9);
+    }
+
+    .pill-secondary {
+      background: #ffffff;
+      color: #000000;
+    }
+
+    .generated-date {
+      font-size: 11px;
+      margin-top: 2px;
+    }
+
+    .content {
+      padding: 32px 32px 24px;
+    }
+
+    .section {
+      margin-bottom: 32px;
+    }
+
+    .section-title {
+      font-size: 16px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      margin-bottom: 14px;
+      border-bottom: 3px solid #000000;
+      padding-bottom: 4px;
+      display: inline-block;
+    }
+
+    .summary-card {
       background: #e8f5e9;
-      border: 3px solid #000;
-      padding: 20px;
-      margin-bottom: 30px;
+      border: 3px solid #000000;
+      padding: 18px 18px 16px;
+      box-shadow: 6px 6px 0 #000000;
+      font-size: 13px;
       line-height: 1.6;
       white-space: pre-wrap;
     }
-    
-    .chart-container {
-      background: #fff;
-      border: 3px solid #000;
-      padding: 20px;
-      margin-bottom: 30px;
-      box-shadow: 5px 5px 0 #000;
+
+    .summary-card p + p {
+      margin-top: 8px;
     }
-    
-    .chart-container img {
+
+    .summary-card strong {
+      font-weight: 700;
+    }
+
+    .paired-section {
+      margin-top: 4px;
+    }
+
+    .row {
+      display: flex;
+      gap: 18px;
+      margin-bottom: 22px;
+      align-items: stretch;
+    }
+
+    .row-text,
+    .row-chart {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .row-text {
+      background: #ffffff;
+      border-radius: 0;
+      border: 3px solid #000000;
+      padding: 14px 14px 12px;
+      font-size: 13px;
+      line-height: 1.6;
+      box-shadow: 5px 5px 0 #000000;
+    }
+
+    .row-subtitle {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      margin-bottom: 6px;
+      border-bottom: 2px solid #000000;
+      display: inline-block;
+      padding-bottom: 2px;
+    }
+
+    .row-text p {
+      margin-top: 4px;
+    }
+
+    .chart-card {
+      background: #ffffff;
+      border-radius: 0;
+      border: 3px solid #000000;
+      padding: 10px 10px 8px;
+      box-shadow: 5px 5px 0 #000000;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chart-card-small {
+      max-width: 360px;
+    }
+
+    .chart-title {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      text-align: center;
+      margin-bottom: 6px;
+      border-bottom: 2px solid #000000;
+      padding-bottom: 2px;
+    }
+
+    .chart-card img {
       width: 100%;
       height: auto;
       display: block;
     }
-    
-    .chart-title {
-      font-size: 18px;
-      font-weight: bold;
-      margin-bottom: 15px;
-      text-align: center;
+
+    .extra-text-section {
+      margin-top: 12px;
     }
-    
+
+    .extra-paragraph {
+      font-size: 13px;
+      line-height: 1.6;
+      margin-bottom: 12px;
+      border-left: 3px solid #000000;
+      padding-left: 10px;
+    }
+
+    .extra-paragraph:last-child {
+      margin-bottom: 0;
+    }
+
+    .extra-charts-section {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
     .footer {
-      background: #000;
-      color: #fff;
-      padding: 20px;
-      text-align: center;
-      font-size: 12px;
+      background: #000000;
+      color: #ffffff;
+      padding: 16px 24px;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border-top: 4px solid #000000;
     }
-    
-    .badge {
-      display: inline-block;
-      background: #ff5722;
-      color: #fff;
-      padding: 5px 15px;
-      border: 2px solid #000;
-      font-weight: bold;
-      margin-right: 10px;
+
+    .footer span {
+      opacity: 0.95;
+    }
+
+    .footer-tags {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+    }
+
+    .footer-pill {
+      padding: 3px 9px;
+      border-radius: 999px;
+      border: 2px solid #ffffff;
+      background: #ffeb3b;
+      color: #000000;
+      font-weight: 800;
+      font-size: 10px;
     }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
-      <h1>📊 Data Analysis Report</h1>
-      <div class="subtitle">
-        <span class="badge">AI-Powered</span>
-        <span class="badge">E2B + Groq</span>
-        Generated: ${new Date().toLocaleDateString()}
+      <div class="header-inner">
+        <div>
+          <h1><span class="icon">📊</span>DATA REPORT</h1>
+          <div class="subtitle">
+            Automatically generated insights & visualizations based on your uploaded CSV.
+          </div>
+        </div>
+        <div class="header-tags">
+          <div class="pill">
+            <span class="dot"></span>
+            <span>AI-POWERED ANALYST</span>
+          </div>
+          <div class="pill pill-secondary">
+            E2B · OpenAI · Exa
+          </div>
+          <div class="generated-date">
+            Generated: ${escapeHtml(new Date().toLocaleString())}
+          </div>
+        </div>
       </div>
     </div>
-    
+
     <div class="content">
+      <!-- Executive Summary -->
       <div class="section">
         <div class="section-title">Executive Summary</div>
-        <div class="summary">${escapeHtml(input.summary)}</div>
+        <div class="summary-card">
+          ${
+            paragraphs.length > 0
+              ? `<p>${paragraphs[0]}</p>`
+              : `<p>${escapeHtml(input.summary)}</p>`
+          }
+        </div>
       </div>
-      
-      ${input.charts.length > 0 ? `
+
+      <!-- Paired Insights & Charts -->
+      ${
+        pairedCount > 0
+          ? `
+      <div class="section paired-section">
+        <div class="section-title">Key Insights & Visualizations</div>
+        ${pairedBlocks}
+      </div>
+      `
+          : ''
+      }
+
+      <!-- Remaining narrative -->
+      ${
+        unpairedText.length > 0
+          ? `
+      <div class="section extra-text-section">
+        <div class="section-title">Additional Details</div>
+        ${remainingTextHtml}
+      </div>
+      `
+          : ''
+      }
+
+      <!-- Remaining charts -->
+      ${
+        remainingChartsHtml
+          ? `
       <div class="section">
-        <div class="section-title">Visualizations (${input.charts.length})</div>
-        ${input.charts.map((chart, i) => `
-          <div class="chart-container">
-            <div class="chart-title">Chart ${i + 1}</div>
-            <img src="data:image/png;base64,${chart.toString('base64')}" alt="Chart ${i + 1}" />
-          </div>
-        `).join('')}
+        <div class="section-title">Additional Charts</div>
+        <div class="extra-charts-section">
+          ${remainingChartsHtml}
+        </div>
       </div>
-      ` : ''}
+      `
+          : ''
+      }
     </div>
-    
+
     <div class="footer">
-      🤖 Generated by WhatsApp Data Analyst Agent | Powered by E2B, Groq, and Exa
+      <span>🤖 Generated by WhatsApp Data Analyst Agent</span>
+      <div class="footer-tags">
+        <div class="footer-pill">E2B</div>
+        <div class="footer-pill">OpenAI</div>
+        <div class="footer-pill">Exa</div>
+      </div>
     </div>
   </div>
 </body>
 </html>
 `;
 
-  // Launch Puppeteer and generate PDF
   const browser = await puppeteer.launch({
     headless: true,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
-      '--disable-gpu'
-    ]
+      '--disable-gpu',
+    ],
   });
 
   const page = await browser.newPage();
@@ -182,8 +448,8 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
       top: '0',
       right: '0',
       bottom: '0',
-      left: '0'
-    }
+      left: '0',
+    },
   });
 
   await browser.close();
@@ -199,8 +465,7 @@ function escapeHtml(text: string): string {
     '<': '&lt;',
     '>': '&gt;',
     '"': '&quot;',
-    "'": '&#039;'
+    "'": '&#039;',
   };
   return text.replace(/[&<>"']/g, (m) => map[m]);
 }
-

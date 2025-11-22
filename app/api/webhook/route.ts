@@ -1,21 +1,27 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { NextRequest, NextResponse } from 'next/server';
 import { put } from '@vercel/blob';
-import { sendWhatsAppMessage, downloadMedia, extractPhoneNumber } from '../lib/twilio.js';
-import { getSession, createSession, updateSession } from '../lib/session-store.js';
-import { runE2BAgent } from '../lib/e2b-agent.js';
-import { generatePDF } from '../lib/pdf-generator.js';
-import { TwilioWebhookPayload } from '../lib/types.js';
+import { sendWhatsAppMessage, downloadMedia, extractPhoneNumber } from '../../../lib/twilio';
+import { getSession, createSession, updateSession } from '../../../lib/session-store';
+import { runE2BAgent } from '../../../lib/e2b-agent';
+import { generatePDF } from '../../../lib/pdf-generator';
+import { TwilioWebhookPayload } from '../../../lib/types';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
+export async function POST(req: NextRequest) {
   try {
-    const payload = req.body as TwilioWebhookPayload;
-    const from = extractPhoneNumber(payload.From);
-    const messageBody = payload.Body || '';
-    const numMedia = parseInt(payload.NumMedia || '0');
+    const payload = await req.formData();
+    
+    // Convert FormData to our expected format
+    const twilioPayload: TwilioWebhookPayload = {
+      From: payload.get('From') as string,
+      Body: payload.get('Body') as string || '',
+      NumMedia: payload.get('NumMedia') as string || '0',
+      MediaContentType0: payload.get('MediaContentType0') as string,
+      MediaUrl0: payload.get('MediaUrl0') as string,
+    };
+
+    const from = extractPhoneNumber(twilioPayload.From);
+    const messageBody = twilioPayload.Body || '';
+    const numMedia = parseInt(twilioPayload.NumMedia || '0');
 
     console.log(`📱 Received message from ${from}: ${messageBody}`);
 
@@ -26,16 +32,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Check if message contains a CSV file
-    const hasCSV = numMedia > 0 && payload.MediaContentType0?.includes('csv');
+    const hasCSV = numMedia > 0 && twilioPayload.MediaContentType0?.includes('csv');
 
     let csvBuffer: Buffer | undefined;
     let userMessage = messageBody;
 
-    if (hasCSV && payload.MediaUrl0) {
+    if (hasCSV && twilioPayload.MediaUrl0) {
       // Download CSV file
       console.log('📥 Downloading CSV file...');
       try {
-        csvBuffer = await downloadMedia(payload.MediaUrl0, process.env.TWILIO_AUTH_TOKEN!);
+        csvBuffer = await downloadMedia(twilioPayload.MediaUrl0, process.env.TWILIO_AUTH_TOKEN!);
         
         // Update session with CSV
         updateSession(from, {
@@ -55,19 +61,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
         
         // Return 200 immediately so Twilio doesn't retry
-        res.status(200).json({ success: true, message: 'Processing started' });
-        
         // Continue processing asynchronously
         processCSVAsync(from, csvBuffer, userMessage, session.conversationHistory).catch(error => {
           console.error('Background processing error:', error);
         });
         
-        return;
+        return NextResponse.json({ success: true, message: 'Processing started' });
         
       } catch (error) {
         console.error('Error downloading CSV:', error);
         await sendWhatsAppMessage(from, '❌ Sorry, I couldn\'t download the CSV file. Please try again.');
-        return res.status(200).json({ success: false });
+        return NextResponse.json({ success: false });
       }
     } else if (!session.csvBuffer) {
       // No CSV in session and no new CSV
@@ -75,7 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         from,
         '👋 Welcome to the Data Analyst Agent!\n\nPlease send me a CSV file to analyze. I can:\n\n📊 Analyze trends and patterns\n📈 Perform statistical analysis\n🌐 Research external context\n📄 Generate beautiful PDF reports\n\nJust send your CSV to get started!'
       );
-      return res.status(200).json({ success: true });
+      return NextResponse.json({ success: true });
     } else {
       // User sent a follow-up message
       csvBuffer = session.csvBuffer;
@@ -92,15 +96,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         '🤖 Analyzing your request...\n\nProcessing with context from your previous CSV. This will take a few minutes...'
       );
       
-      // Return 200 immediately
-      res.status(200).json({ success: true, message: 'Processing started' });
-      
       // Continue processing asynchronously
       processCSVAsync(from, csvBuffer!, userMessage, session.conversationHistory).catch(error => {
         console.error('Background processing error:', error);
       });
       
-      return;
+      return NextResponse.json({ success: true, message: 'Processing started' });
     }
 
   } catch (error) {
@@ -108,8 +109,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     
     // Try to notify user of error
     try {
-      const payload = req.body as TwilioWebhookPayload;
-      const from = extractPhoneNumber(payload.From);
+      const payload = await req.formData();
+      const from = extractPhoneNumber(payload.get('From') as string);
       await sendWhatsAppMessage(
         from,
         '❌ Sorry, something went wrong while analyzing your data. Please try again later.'
@@ -118,7 +119,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('Failed to notify user of error:', notifyError);
     }
 
-    return res.status(500).json({ error: 'Internal server error' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 

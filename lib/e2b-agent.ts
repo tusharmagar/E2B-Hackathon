@@ -8,7 +8,7 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
   
   const sandbox = await CodeInterpreter.create({
     apiKey: process.env.E2B_API_KEY,
-    timeoutMs: 600000 // 10 minutes to be safe
+    timeout: 600000 // 10 minutes to be safe
   });
 
   try {
@@ -50,13 +50,13 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
     
     await sandbox.process.startAndWait({
       cmd: 'DEBIAN_FRONTEND=noninteractive sudo -E apt-get update -qq',
-      onStdout: (data) => process.stdout.write('.'),
+      onStdout: (data) => { process.stdout.write('.'); },
       onStderr: () => {}
     });
     
     await sandbox.process.startAndWait({
       cmd: 'DEBIAN_FRONTEND=noninteractive sudo -E apt-get install -qq -y docker.io curl ca-certificates gnupg chromium fonts-liberation libnss3 libatk-bridge2.0-0 libgbm1',
-      onStdout: (data) => process.stdout.write('.'),
+      onStdout: (data) => { process.stdout.write('.'); },
       onStderr: () => {}
     });
     
@@ -78,13 +78,13 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
     console.log('📦 Installing Node.js 20...');
     await sandbox.process.startAndWait({
       cmd: 'curl -fsSL https://deb.nodesource.com/setup_20.x | DEBIAN_FRONTEND=noninteractive sudo -E bash -',
-      onStdout: (data) => process.stdout.write('.'),
+      onStdout: (data) => { process.stdout.write('.'); },
       onStderr: () => {}
     });
     
     await sandbox.process.startAndWait({
       cmd: 'DEBIAN_FRONTEND=noninteractive sudo -E apt-get install -qq -y nodejs',
-      onStdout: (data) => process.stdout.write('.'),
+      onStdout: (data) => { process.stdout.write('.'); },
       onStderr: () => {}
     });
     
@@ -102,7 +102,7 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
     
     await sandbox.process.startAndWait({
       cmd: 'cd /home/user && DEBIAN_FRONTEND=noninteractive npm install --legacy-peer-deps --no-audit --no-fund',
-      onStdout: (data) => process.stdout.write('.'),
+      onStdout: (data) => { process.stdout.write('.'); },
       onStderr: () => {}
     });
     

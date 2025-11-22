@@ -85,24 +85,45 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
     
     // Pull Exa MCP Docker image
     console.log('📥 Pulling Exa MCP Docker image...');
-    await sandbox.process.startAndWait('docker pull mcp/exa');
+    const dockerPull = await sandbox.process.start({
+      cmd: 'docker pull mcp/exa',
+      onStdout: (data) => console.log('docker:', data),
+      onStderr: (data) => console.log('docker error:', data)
+    });
+    const dockerResult = await dockerPull.wait();
+    if (dockerResult.exitCode !== 0) {
+      throw new Error(`Docker pull failed with exit code ${dockerResult.exitCode}`);
+    }
+    console.log('   ✅ Docker image pulled');
 
     // Install Node.js dependencies
     console.log('📦 Installing Node.js packages...');
+    console.log('   This may take 2-3 minutes...');
     const npmInstall = await sandbox.process.start({
       cmd: 'cd /home/user && npm install --legacy-peer-deps',
       onStdout: (data) => console.log('npm:', data),
-      onStderr: (data) => console.log('npm error:', data)
+      onStderr: (data) => console.log('npm stderr:', data)
     });
-    await npmInstall.wait();
-    console.log('   ✅ npm install completed');
+    const npmResult = await npmInstall.wait();
+    console.log(`   npm install exit code: ${npmResult.exitCode}`);
+    
+    if (npmResult.exitCode !== 0) {
+      throw new Error(`npm install failed with exit code ${npmResult.exitCode}`);
+    }
+    console.log('   ✅ npm install completed successfully');
 
     // Verify tsx is installed
     console.log('🔍 Checking tsx installation...');
-    await sandbox.process.startAndWait('ls -la /home/user/node_modules/.bin/tsx || echo "tsx not found"');
+    const tsxCheck = await sandbox.process.start({
+      cmd: 'ls -la /home/user/node_modules/.bin/ && ls -la /home/user/node_modules/tsx/ || echo "tsx not found"',
+      onStdout: (data) => console.log('tsx check:', data),
+      onStderr: (data) => console.log('tsx check error:', data)
+    });
+    await tsxCheck.wait();
 
     // Run the agent with node and tsx
     console.log('🤖 Running multi-step agent...');
+    console.log('   Using: node --import tsx agent.ts');
     const agentProcess = await sandbox.process.start({
       cmd: 'cd /home/user && node --import ./node_modules/tsx/dist/esm/index.mjs agent.ts',
       envVars: {
@@ -111,11 +132,17 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
         USER_MESSAGE: input.userMessage,
         CONVERSATION_HISTORY: JSON.stringify(input.conversationHistory)
       },
-      onStdout: (data) => console.log('Agent:', data),
-      onStderr: (data) => console.error('Agent Error:', data)
+      onStdout: (data) => console.log('Agent stdout:', data),
+      onStderr: (data) => console.error('Agent stderr:', data)
     });
 
-    await agentProcess.wait();
+    const agentResult = await agentProcess.wait();
+    console.log(`   Agent exit code: ${agentResult.exitCode}`);
+    
+    if (agentResult.exitCode !== 0) {
+      throw new Error(`Agent failed with exit code ${agentResult.exitCode}`);
+    }
+    console.log('   ✅ Agent completed successfully');
 
     // Download generated PDF
     console.log('📥 Downloading generated PDF...');

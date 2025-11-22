@@ -1,5 +1,4 @@
-import pkg from '@e2b/code-interpreter';
-const { Sandbox } = pkg;
+import Sandbox from '@e2b/code-interpreter';
 import { generateText } from 'ai';
 import { groq } from '@ai-sdk/groq';
 import { tool } from 'ai';
@@ -23,7 +22,7 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
     sandbox = await Promise.race([
       Sandbox.create({
         apiKey: process.env.E2B_API_KEY,
-        timeout: 300000 // 5 minutes
+        timeoutMs: 300000 // 5 minutes
       }),
       new Promise<never>((_, reject) => 
         setTimeout(() => reject(new Error('E2B sandbox creation timed out after 30 seconds')), 30000)
@@ -39,7 +38,7 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
     // Upload CSV to sandbox
     console.log('📤 Uploading CSV to sandbox...');
     const csvPath = 'data.csv';
-    await sandbox.files.write(csvPath, input.csvBuffer);
+    await sandbox.files.write(csvPath, input.csvBuffer.toString('utf-8'));
     console.log(`   ✅ CSV uploaded to ${csvPath}`);
 
     // Store all charts generated during analysis

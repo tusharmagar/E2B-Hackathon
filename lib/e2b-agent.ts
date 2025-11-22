@@ -1,67 +1,125 @@
 import { CodeInterpreter } from '@e2b/code-interpreter';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { E2BAgentInput, E2BAgentOutput } from './types.js';
-
-// Template ID will be set after building the custom template
-// Run: npx e2b template build --name whatsapp-data-analyst
-// Then set E2B_TEMPLATE_ID in your .env file
-const TEMPLATE_ID = process.env.E2B_TEMPLATE_ID || undefined;
 
 export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput> {
   console.log('🚀 Initializing E2B sandbox...');
   
-  const sandboxConfig: any = {
+  const sandbox = await CodeInterpreter.create({
     apiKey: process.env.E2B_API_KEY,
-    timeoutMs: 300000 // 5 minutes
-  };
-  
-  // Use custom template if provided
-  if (TEMPLATE_ID) {
-    console.log(`   📦 Using custom template: ${TEMPLATE_ID}`);
-    sandboxConfig.template = TEMPLATE_ID;
-  } else {
-    console.log('   ⚠️ No custom template found, using default (will take 3-5 min to install dependencies)');
-  }
-  
-  const sandbox = await CodeInterpreter.create(sandboxConfig);
+    timeoutMs: 600000 // 10 minutes to be safe
+  });
 
   try {
     // Upload CSV file to sandbox
     console.log('📤 Uploading CSV to sandbox...');
     await sandbox.filesystem.write('/home/user/data.csv', input.csvBuffer.toString('utf-8'));
-    console.log('   ✅ CSV uploaded');
 
-    // Run the agent (all dependencies are pre-installed if using custom template!)
-    console.log('🤖 Running multi-step agent...');
-    if (TEMPLATE_ID) {
-      console.log('   ⚡ Using pre-installed environment (Node.js, npm packages, Chrome ready!)');
-    } else {
-      console.log('   ⏳ Installing dependencies in sandbox (this will take 3-5 minutes)...');
+    // Create tools directory
+    console.log('📁 Creating directories...');
+    await sandbox.filesystem.makeDir('/home/user/tools');
+
+    // Read and upload all sandbox scripts
+    console.log('📦 Uploading agent scripts...');
+    const sandboxFiles = [
+      'sandbox-script/agent.ts',
+      'sandbox-script/package.json',
+      'sandbox-script/pdf-generator.ts',
+      'sandbox-script/pdf-template.html',
+      'sandbox-script/tools/sql-tool.ts',
+      'sandbox-script/tools/exa-tool.ts',
+      'sandbox-script/tools/stats-tool.ts',
+      'sandbox-script/tools/chart-tool.ts'
+    ];
+
+    for (const file of sandboxFiles) {
+      try {
+        const content = readFileSync(join(process.cwd(), file), 'utf-8');
+        const sandboxPath = `/home/user/${file.replace('sandbox-script/', '')}`;
+        await sandbox.filesystem.write(sandboxPath, content);
+        console.log(`   ✅ Uploaded ${file}`);
+      } catch (error) {
+        console.warn(`Could not upload ${file}:`, error);
+      }
     }
+
+    // Install system dependencies (non-interactive)
+    console.log('\n🔧 Installing system dependencies (Docker, Node.js)...');
+    console.log('   This takes 60-90 seconds...\n');
     
+    await sandbox.process.startAndWait({
+      cmd: 'DEBIAN_FRONTEND=noninteractive sudo -E apt-get update -qq',
+      onStdout: (data) => process.stdout.write('.'),
+      onStderr: () => {}
+    });
+    
+    await sandbox.process.startAndWait({
+      cmd: 'DEBIAN_FRONTEND=noninteractive sudo -E apt-get install -qq -y docker.io curl ca-certificates gnupg',
+      onStdout: (data) => process.stdout.write('.'),
+      onStderr: () => {}
+    });
+    
+    console.log('\n   ✅ Docker installed');
+    
+    // Install Node.js from NodeSource
+    console.log('📦 Installing Node.js 20...');
+    await sandbox.process.startAndWait({
+      cmd: 'curl -fsSL https://deb.nodesource.com/setup_20.x | DEBIAN_FRONTEND=noninteractive sudo -E bash -',
+      onStdout: (data) => process.stdout.write('.'),
+      onStderr: () => {}
+    });
+    
+    await sandbox.process.startAndWait({
+      cmd: 'DEBIAN_FRONTEND=noninteractive sudo -E apt-get install -qq -y nodejs',
+      onStdout: (data) => process.stdout.write('.'),
+      onStderr: () => {}
+    });
+    
+    console.log('\n   ✅ Node.js installed');
+
+    // Verify installations
+    const nodeCheck = await sandbox.process.startAndWait({ cmd: 'node --version' });
+    const npmCheck = await sandbox.process.startAndWait({ cmd: 'npm --version' });
+    console.log(`   Node: ${nodeCheck.stdout?.trim()}`);
+    console.log(`   npm: ${npmCheck.stdout?.trim()}`);
+
+    // Install Node.js dependencies
+    console.log('\n📦 Installing npm packages...');
+    console.log('   This takes 2-3 minutes (installing puppeteer, better-sqlite3, etc.)...\n');
+    
+    await sandbox.process.startAndWait({
+      cmd: 'cd /home/user && DEBIAN_FRONTEND=noninteractive npm install --legacy-peer-deps --no-audit --no-fund',
+      onStdout: (data) => process.stdout.write('.'),
+      onStderr: () => {}
+    });
+    
+    console.log('\n   ✅ npm packages installed');
+
+    // Run the agent
+    console.log('\n🤖 Running multi-step agent...\n');
     const agentProcess = await sandbox.process.start({
-      cmd: 'npx tsx /home/user/agent.ts',
+      cmd: 'node --loader tsx /home/user/agent.ts',
+      cwd: '/home/user',
       envVars: {
         EXA_API_KEY: process.env.EXA_API_KEY || '',
         GROQ_API_KEY: process.env.GROQ_API_KEY || '',
         USER_MESSAGE: input.userMessage,
         CONVERSATION_HISTORY: JSON.stringify(input.conversationHistory)
       },
-      onStdout: (data) => console.log('   📊', data),
-      onStderr: (data) => console.error('   ⚠️', data)
+      onStdout: (data) => console.log('Agent:', data),
+      onStderr: (data) => console.error('Agent Error:', data)
     });
 
-    const agentResult = await agentProcess.wait();
-    console.log(`   Agent exit code: ${agentResult.exitCode}`);
-    
-    if (agentResult.exitCode !== 0) {
-      throw new Error(`Agent failed with exit code ${agentResult.exitCode}`);
+    const agentOutput = await agentProcess.wait();
+    if (agentOutput.exitCode !== 0) {
+      throw new Error(`Agent execution failed with exit code ${agentOutput.exitCode}`);
     }
-    console.log('   ✅ Agent completed successfully');
+    console.log('\n   ✅ Agent execution completed');
 
     // Download generated PDF
     console.log('📥 Downloading generated PDF...');
     const pdfBuffer = await sandbox.filesystem.read('/home/user/report.pdf');
-    console.log('   ✅ PDF downloaded');
 
     // Download insights JSON
     console.log('📊 Retrieving insights...');
@@ -69,12 +127,11 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
     try {
       const insightsJson = await sandbox.filesystem.read('/home/user/insights.json');
       insights = JSON.parse(insightsJson.toString());
-      console.log('   ✅ Insights retrieved');
     } catch (error) {
-      console.warn('   ⚠️ Could not read insights.json');
+      console.warn('Could not read insights.json');
     }
 
-    console.log('✅ E2B agent completed successfully');
+    console.log('✅ E2B agent completed successfully\n');
 
     return {
       pdfBuffer: Buffer.from(pdfBuffer),

@@ -1,5 +1,4 @@
-# E2B Template Configuration
-template_name = "whatsapp-data-analyst"
+# E2B Template Configuration (v2)
+template_id = "whatsapp-data-analyst"
 dockerfile = "e2b.Dockerfile"
-start_cmd = "cd /home/user"
 

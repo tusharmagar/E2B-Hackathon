@@ -4,6 +4,7 @@ import puppeteer from 'puppeteer';
 export interface PDFGenerationInput {
   summary: string;
   charts: Buffer[];
+  externalContext?: string;
 }
 
 export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
@@ -65,6 +66,16 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
     `,
     )
     .join('');
+
+  const externalContextHtml = input.externalContext
+    ? input.externalContext
+        .split(/\n\s*\n/)
+        .map(
+          (p) =>
+            `<p>${escapeHtml(p.trim()).replace(/\n/g, '<br />')}</p>`,
+        )
+        .join('\n')
+    : '';
 
   // Create HTML content
   const html = `
@@ -175,6 +186,8 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
 
     .section {
       margin-bottom: 32px;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }
 
     .section-title {
@@ -196,6 +209,8 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
       font-size: 13px;
       line-height: 1.6;
       white-space: pre-wrap;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }
 
     .summary-card p + p {
@@ -211,10 +226,13 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
     }
 
     .row {
-      display: flex;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
       gap: 18px;
       margin-bottom: 22px;
       align-items: stretch;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }
 
     .row-text,
@@ -232,6 +250,8 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
       font-size: 13px;
       line-height: 1.6;
       box-shadow: 5px 5px 0 #000000;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }
 
     .row-subtitle {
@@ -257,6 +277,8 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
       box-shadow: 5px 5px 0 #000000;
       display: flex;
       flex-direction: column;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }
 
     .chart-card-small {
@@ -278,6 +300,8 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
       width: 100%;
       height: auto;
       display: block;
+      object-fit: contain;
+      max-height: 320px;
     }
 
     .extra-text-section {
@@ -301,6 +325,21 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 16px;
+    }
+
+    .external-context {
+      background: #fff8e1;
+      border: 3px solid #000000;
+      padding: 14px 14px 12px;
+      box-shadow: 6px 6px 0 #000000;
+      font-size: 13px;
+      line-height: 1.6;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+
+    .external-context p + p {
+      margin-top: 8px;
     }
 
     .footer {
@@ -375,6 +414,19 @@ export async function generatePDF(input: PDFGenerationInput): Promise<Buffer> {
           }
         </div>
       </div>
+
+      ${
+        externalContextHtml
+          ? `
+      <div class="section">
+        <div class="section-title">External Context (Links)</div>
+        <div class="external-context">
+          ${externalContextHtml}
+        </div>
+      </div>
+      `
+          : ''
+      }
 
       <!-- Paired Insights & Charts -->
       ${

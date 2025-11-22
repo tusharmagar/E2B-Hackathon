@@ -20,6 +20,54 @@ type MCPSandbox = any;
 
 // -------------------- Helpers --------------------
 
+function extractResponseOutputText(resp: any): string {
+  if (!resp) return '';
+
+  // Preferred field from Responses API
+  if (resp.output_text) {
+    return String(resp.output_text).trim();
+  }
+
+  const parts: string[] = [];
+  const push = (val: any) => {
+    if (val) parts.push(String(val));
+  };
+
+  const scanContent = (content: any) => {
+    if (!content) return;
+    if (typeof content === 'string') {
+      push(content);
+      return;
+    }
+    if (Array.isArray(content)) {
+      content.forEach(scanContent);
+      return;
+    }
+    if (content.type === 'output_text' && content.text) {
+      push(content.text);
+    }
+    if (content.output_text?.text) {
+      push(content.output_text.text);
+    }
+    if (content.text?.value) {
+      push(content.text.value);
+    }
+    if (content.text) {
+      push(content.text);
+    }
+  };
+
+  if (Array.isArray(resp.output)) {
+    resp.output.forEach((chunk: any) => {
+      if (chunk?.output_text) push(chunk.output_text);
+      if (chunk?.output_text?.text) push(chunk.output_text.text);
+      scanContent(chunk.content);
+    });
+  }
+
+  return parts.join('\n').trim();
+}
+
 async function uploadCsvToSandbox(
   sandbox: Sandbox,
   csvBuffer: Buffer,
@@ -127,8 +175,13 @@ Return your answer as markdown paragraphs and bullet points, no code.
 
     console.log('   🌐 Starting MCP-based Exa research via OpenAI Responses...');
     const response = await (client as any).responses.create({
-      model: 'gpt-4o-mini',
-      input: researchPrompt,
+      model: 'gpt-4.1',
+      input: [
+        {
+          role: 'user',
+          content: [{ type: 'input_text', text: researchPrompt }],
+        },
+      ],
       tools: [
         {
           type: 'mcp',
@@ -139,32 +192,30 @@ Return your answer as markdown paragraphs and bullet points, no code.
           },
         },
       ],
+      tool_choice: 'auto',
     });
 
-    // OpenAI Responses has a convenience field `output_text` in the Node SDK.
     const anyResp = response as any;
-    let outputText: string = anyResp.output_text || '';
+    const outputText = extractResponseOutputText(anyResp);
 
-    // Fallback: if for some reason output_text is missing, try to stitch from output[]
-    if (!outputText && Array.isArray(anyResp.output)) {
-      outputText = anyResp.output
-        .map((chunk: any) =>
-          (chunk.content || [])
-            .map(
-              (c: any) =>
-                c?.text?.value ||
-                c?.text ||
-                (c?.type === 'output_text' ? c.value : ''),
-            )
-            .join(' '),
-        )
-        .join('\n');
-    }
-
-    outputText = (outputText || '').trim();
     console.log(
       `   📎 Exa MCP external context length: ${outputText.length} chars`,
     );
+    if (!outputText) {
+      console.warn(
+        '   ⚠️ Exa MCP returned no text. Continuing without external context.',
+      );
+      console.log(
+        '   🧪 Exa MCP raw output keys:',
+        Object.keys(anyResp || {}),
+      );
+      if (anyResp?.output) {
+        console.log(
+          '   🧪 Exa MCP raw output preview:',
+          JSON.stringify(anyResp.output).slice(0, 400),
+        );
+      }
+    }
 
     return outputText;
   } catch (err) {
@@ -183,7 +234,7 @@ Return your answer as markdown paragraphs and bullet points, no code.
 export async function runE2BAgent(
   input: E2BAgentInput,
 ): Promise<E2BAgentOutput> {
-  console.log('\n🚀 --- STARTING AGENT RUN (OpenAI GPT-4o, E2B + Exa MCP) ---');
+  console.log('\n🚀 --- STARTING AGENT RUN (OpenAI GPT-5.1, E2B + Exa MCP) ---');
 
   if (!process.env.E2B_API_KEY) throw new Error('E2B_API_KEY missing');
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY missing');
@@ -386,7 +437,7 @@ If you attempt to answer in natural language before generating charts, the orche
       );
 
       const completion = await client.chat.completions.create({
-        model: 'gpt-4o',
+        model: 'gpt-5.1',
         messages,
         tools,
         tool_choice: 'auto',
@@ -584,6 +635,7 @@ If you attempt to answer in natural language before generating charts, the orche
     const output: E2BAgentOutput = {
       summary: finalSummary,
       charts: allCharts,
+      externalContext,
       insights: {
         steps: 'manual-chat-loop',
         analysis: finalSummary,

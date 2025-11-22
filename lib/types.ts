@@ -43,6 +43,6 @@ export interface E2BAgentInput {
 export interface E2BAgentOutput {
   summary: string;
   charts: Buffer[];  // Array of chart image buffers from matplotlib
+  externalContext?: string;
   insights: any;     // Raw insights from agent
 }
-

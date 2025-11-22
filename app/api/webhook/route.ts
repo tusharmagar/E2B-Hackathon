@@ -146,7 +146,8 @@ async function processCSVAsync(
     console.log('📄 Generating PDF report...');
     const pdfBuffer = await generatePDF({
       summary: result.summary,
-      charts: result.charts
+      charts: result.charts,
+      externalContext: result.externalContext
     });
 
     // Upload PDF to Vercel Blob

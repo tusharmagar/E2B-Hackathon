@@ -6,6 +6,8 @@ import { runE2BAgent } from '../../../lib/e2b-agent';
 import { generatePDF } from '../../../lib/pdf-generator';
 import { TwilioWebhookPayload } from '../../../lib/types';
 
+export const maxDuration = 300;
+
 export async function POST(req: NextRequest) {
   try {
     const payload = await req.formData();
@@ -183,4 +185,3 @@ async function processCSVAsync(
     }
   }
 }
-

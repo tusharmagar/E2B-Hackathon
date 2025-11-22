@@ -51,7 +51,7 @@ No dashboard login. No complex setup. Just answers.
 ## ✨ What It Does
 
 1. **📤 Send CSV** - Drop any CSV file into WhatsApp
-2. **🤖 AI Analyzes** - GPT-4o explores your data in an E2B sandbox
+2. **🤖 AI Analyzes** - LLM explores your data in an E2B sandbox
 3. **🌐 Adds Context** - Searches the web for relevant trends (via Exa MCP)
 4. **📊 Creates Charts** - Generates visualizations automatically
 5. **📱 Get PDF** - Receive a beautiful report via WhatsApp
@@ -82,14 +82,14 @@ User sends CSV via WhatsApp → Twilio webhook → Next.js downloads file
 Creates isolated Python environment → Uploads CSV → Converts to SQLite
 
 **4) Analyze data (KPIs + ≥3 charts)** 📊  
-GPT-4o runs multi-step analysis → Computes metrics → Generates visualizations with Matplotlib
+LLM runs multi-step analysis → Computes metrics → Generates visualizations with Matplotlib
 
 **5) Generate PDF & deliver to user** 📄  
 Puppeteer renders neobrutalism-styled report → Uploads to Vercel Blob → WhatsApp delivers link
 
 ---
 
-**Tech Stack:** E2B Code Interpreter • OpenAI GPT-4o • Exa MCP (Docker) • Next.js • Twilio • Puppeteer
+**Tech Stack:** E2B Code Interpreter • OpenAI LLM • Exa MCP (Docker) • Next.js • Twilio • Puppeteer
 
 ---
 
@@ -97,38 +97,58 @@ Puppeteer renders neobrutalism-styled report → Uploads to Vercel Blob → What
 
 ✅ **E2B Code Interpreter** - All Python analysis runs in isolated sandboxes  
 ✅ **Exa MCP (Docker)** - Web research via E2B MCP gateway  
-✅ **Multi-Step Agent** - GPT-4o orchestrates iterative analysis  
+✅ **Multi-Step Agent** - LLM orchestrates iterative analysis  
 ✅ **Working Demo** - Fully deployed on Vercel with WhatsApp integration
 
 ---
 
-## 🛠️ Setup
+## 🛠️ Quick Start 
 
-**Requirements:** Node.js 18+, API keys (all have free tiers)
+**Requirements:** Node.js 18+, API keys (all have free tiers), [ngrok](https://ngrok.com) (for webhook tunneling)
 
+### 1. Clone & Install
 ```bash
-# Clone and install
-git clone https://github.com/yourusername/E2B-Hackathon.git
+git clone https://github.com/tusharmagar/E2B-Hackathon.git
 cd E2B-Hackathon
 npm install
+```
 
-# Add API keys to .env.local
+### 2. Add API Keys
+```bash
 cp env.example .env.local
-# Edit .env.local with your keys
-
-# Deploy
-vercel --prod
+# Edit .env.local with your keys (see below)
 ```
 
 **API Keys Needed:**
-- E2B → [e2b.dev](https://e2b.dev) (free $100 credits)
-- OpenAI → [platform.openai.com](https://platform.openai.com)
-- Exa → [exa.ai](https://exa.ai) (free 1000 searches)
-- Twilio → [twilio.com](https://twilio.com) (free trial)
-- Vercel Blob → Auto-created after deploying
+- 🟢 **E2B** → [e2b.dev](https://e2b.dev) (free $100 credits)
+- 🟣 **OpenAI** → [platform.openai.com](https://platform.openai.com/api-keys)
+- 🔵 **Exa** → [exa.ai](https://exa.ai) (free 1000 searches)
+- 🟢 **Twilio** → [twilio.com/console](https://twilio.com/console) (free trial)
+- ⚡ **Vercel Blob** → [vercel.com/storage](https://vercel.com/storage) (create free blob storage)
 
-**Configure Twilio Webhook:**  
-Set WhatsApp webhook to: `https://your-app.vercel.app/api/webhook`
+### 3. Start Dev Server
+```bash
+npm run dev
+```
+Server will run on `http://localhost:3000`
+
+### 4. Expose with ngrok
+Open a **new terminal** and run:
+```bash
+ngrok http 3000
+```
+Copy the `https://` forwarding URL (e.g., `https://abc123.ngrok.io`)
+
+### 5. Configure Twilio Webhook
+1. Go to [Twilio WhatsApp Sandbox](https://console.twilio.com/us1/develop/sms/try-it-out/whatsapp-learn)
+2. Under **Sandbox Configuration**, set "When a message comes in" to:
+   ```
+   https://abc123.ngrok.io/api/webhook
+   ```
+3. Save
+
+### 6. Start Chatting! 🎉
+Send your WhatsApp number the join code from Twilio, then send any CSV file to start analyzing!
 
 ---
 

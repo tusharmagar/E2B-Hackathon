@@ -44,13 +44,44 @@ export async function runE2BAgent(input: E2BAgentInput): Promise<E2BAgentOutput>
 
     // Install system dependencies
     console.log('🐳 Installing Docker and dependencies...');
-    await sandbox.process.startAndWait('apt-get update');
-    await sandbox.process.startAndWait('apt-get install -y docker.io curl');
+    const aptUpdate = await sandbox.process.start({
+      cmd: 'apt-get update',
+      onStdout: (data) => console.log('apt-get:', data),
+      onStderr: (data) => console.log('apt-get error:', data)
+    });
+    await aptUpdate.wait();
+    
+    const aptInstall = await sandbox.process.start({
+      cmd: 'apt-get install -y docker.io curl',
+      onStdout: (data) => console.log('install:', data),
+      onStderr: (data) => console.log('install error:', data)
+    });
+    await aptInstall.wait();
     
     // Install Node.js from NodeSource
     console.log('📦 Installing Node.js...');
-    await sandbox.process.startAndWait('curl -fsSL https://deb.nodesource.com/setup_20.x | bash -');
-    await sandbox.process.startAndWait('apt-get install -y nodejs');
+    const nodeSetup = await sandbox.process.start({
+      cmd: 'curl -fsSL https://deb.nodesource.com/setup_20.x | bash -',
+      onStdout: (data) => console.log('node setup:', data),
+      onStderr: (data) => console.log('node setup error:', data)
+    });
+    await nodeSetup.wait();
+    
+    const nodeInstall = await sandbox.process.start({
+      cmd: 'apt-get install -y nodejs',
+      onStdout: (data) => console.log('node install:', data),
+      onStderr: (data) => console.log('node install error:', data)
+    });
+    await nodeInstall.wait();
+    
+    // Verify Node.js installation
+    console.log('🔍 Verifying Node.js installation...');
+    const nodeCheck = await sandbox.process.start({
+      cmd: 'which node && node --version && which npm && npm --version',
+      onStdout: (data) => console.log('node check:', data),
+      onStderr: (data) => console.log('node check error:', data)
+    });
+    await nodeCheck.wait();
     
     // Pull Exa MCP Docker image
     console.log('📥 Pulling Exa MCP Docker image...');

@@ -1,16 +1,30 @@
-# E2B Custom Template Setup
+# E2B Setup
 
-This project uses a **custom E2B sandbox template** with Node.js and all dependencies pre-installed. This reduces execution time from **3-5 minutes to ~30-60 seconds**!
+## Default Setup (Working Now!)
 
-## Why Custom Template?
+The system currently works with the **default E2B Code Interpreter** template. On first run, it will:
+
+1. Install Docker (~30s)
+2. Install Node.js 20 (~30s)
+3. Install npm packages (~2-3 min)
+4. Run the agent (~1-2 min)
+
+**Total time: 4-5 minutes** ⏱️
+
+This is perfectly fine for a hackathon demo! The installation happens once per sandbox.
+
+---
+
+## Optional: Custom Template (For Production)
+
+To reduce execution time from **4-5 minutes to ~30 seconds**, you can build a custom E2B template with everything pre-installed:
 
 - ✅ Node.js 20.x pre-installed
-- ✅ All npm packages pre-installed (better-sqlite3, puppeteer, groq, etc.)
+- ✅ All npm packages pre-installed
 - ✅ Chromium browser pre-installed
-- ✅ All system dependencies ready
 - ✅ **Instant startup** - no installation time!
 
-## Build the Template
+### Build Custom Template
 
 ### 1. Install E2B CLI
 
